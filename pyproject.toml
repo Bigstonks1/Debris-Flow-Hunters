@@ -1,0 +1,13 @@
+[project]
+name = "debris-flow-hunters"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pfdf>=3.0.2",
+    "wildcat>=1.1.1",
+]
+
+[[tool.uv.index]]
+url = "https://code.usgs.gov/api/v4/groups/859/-/packages/pypi/simple"

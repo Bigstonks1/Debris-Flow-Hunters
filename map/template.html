@@ -1,0 +1,774 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Post-Fire Debris-Flow Hazard</title>
+<style>/*LEAFLET_CSS*/</style>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --panel: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --hairline: #e1e0d9;
+  --ring: rgba(11, 11, 11, 0.10);
+  --accent: #c33c00;
+  --control: #f0efec;
+  --control-on: #0b0b0b;
+  --control-on-ink: #ffffff;
+  /* ordinal hazard ramp, light -> dark = less -> more hazardous (validated, light surface) */
+  --r0: #ec9d53; --r1: #e17e32; --r2: #d55d0d; --r3: #c33c00; --r4: #a12818; --r5: #7c1d1e;
+  --none: #9a978f;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d; --panel: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+    --hairline: #2c2c2a; --ring: rgba(255, 255, 255, 0.10); --accent: #e17e32;
+    --control: #2c2c2a; --control-on: #ffffff; --control-on-ink: #0b0b0b;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --panel: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+  --hairline: #2c2c2a; --ring: rgba(255, 255, 255, 0.10); --accent: #e17e32;
+  --control: #2c2c2a; --control-on: #ffffff; --control-on-ink: #0b0b0b;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--page); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  display: grid; grid-template-columns: 360px 1fr; height: 100vh;
+}
+aside {
+  background: var(--panel); border-right: 1px solid var(--hairline);
+  overflow-y: auto; padding: 20px 20px 28px; display: flex; flex-direction: column; gap: 18px;
+}
+#map { height: 100%; background: #e9e8e4; }
+h1 { font-size: 18px; line-height: 1.25; margin: 0; letter-spacing: -0.01em; }
+.sub { color: var(--ink-2); margin: 4px 0 0; font-size: 13px; }
+.label { font-size: 12px; font-weight: 600; color: var(--ink-2); margin: 0 0 6px;
+         text-transform: uppercase; letter-spacing: 0.04em; }
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px;
+       background: var(--control); padding: 3px; border-radius: 8px; }
+.seg button {
+  font: inherit; font-size: 13px; border: 0; border-radius: 6px; padding: 7px 8px;
+  background: transparent; color: var(--ink); cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: var(--control-on); color: var(--control-on-ink); font-weight: 600; }
+select {
+  width: 100%; font: inherit; padding: 8px 10px; border-radius: 8px; color: var(--ink);
+  background: var(--control); border: 1px solid var(--ring);
+}
+.explain { font-size: 13px; color: var(--ink-2); margin: 6px 0 0; }
+#storm-ctl { margin-top: 12px; }
+.storm-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; }
+.storm-head b { font-size: 20px; font-weight: 650; }
+#storm { width: 100%; margin: 6px 0 0; accent-color: var(--accent); }
+.storm-scale { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.tile { border: 1px solid var(--hairline); border-radius: 10px; padding: 10px 12px; }
+.tile .v { font-size: 22px; font-weight: 650; letter-spacing: -0.01em; }
+.tile .v small { font-size: 12px; font-weight: 500; color: var(--ink-2); margin-left: 2px; }
+.tile .k { font-size: 12px; color: var(--ink-2); }
+.tile .n { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.legend { display: flex; flex-direction: column; gap: 5px; }
+.legend .row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.legend .row .sw { width: 28px; height: 5px; border-radius: 3px; box-shadow: 0 0 0 1.5px #fff, 0 0 0 2.5px var(--ring); }
+.legend .row .sw.none { background: repeating-linear-gradient(90deg, var(--none) 0 5px, transparent 5px 8px); box-shadow: none; }
+.legend .row .sev { width: 16px; height: 12px; border-radius: 3px; border: 1px solid var(--ring); }
+.legend .cap { font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+.toggles label { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 3px 0; cursor: pointer; }
+.formula summary { font-size: 12px; font-weight: 600; color: var(--ink-2); cursor: pointer;
+                   text-transform: uppercase; letter-spacing: 0.04em; }
+.formula .eq { font: 12.5px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace;
+               background: var(--control); border-radius: 6px; padding: 8px 10px; margin: 8px 0 6px;
+               overflow-x: auto; white-space: nowrap; }
+.formula p { font-size: 12.5px; color: var(--ink-2); margin: 4px 0; }
+.formula table { border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; margin: 6px 0; }
+.formula td, .formula th { padding: 2px 10px 2px 0; text-align: left; }
+.formula th { color: var(--ink-2); font-weight: 600; }
+.formula .src { font-size: 11.5px; color: var(--muted); }
+.app input { font: inherit; font-size: 13px; color: var(--ink); background: var(--control);
+             border: 1px solid var(--ring); border-radius: 8px; padding: 7px 9px; width: 100%; }
+.app .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
+.app button, .exports a { font: inherit; font-size: 13px; font-weight: 600; border: 0; border-radius: 8px;
+             padding: 8px 10px; cursor: pointer; text-decoration: none; text-align: center; }
+.app button { width: 100%; margin-top: 6px; background: var(--control-on); color: var(--control-on-ink); }
+.app button:disabled { opacity: 0.5; cursor: default; }
+.exports { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.exports a { background: var(--control); color: var(--ink); border: 1px solid var(--ring); }
+#run-status { white-space: pre-wrap; }
+.picks { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.app button.pick { font: inherit; font-weight: 400; margin: 0; text-align: left; cursor: pointer; background: var(--panel); color: var(--ink);
+        border: 1px solid var(--hairline); border-radius: 8px; padding: 8px 10px; }
+.app button.pick[aria-pressed="true"] { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+.pick .where { font-size: 12.5px; color: var(--ink-2); }
+.pick .uid { font: 11.5px ui-monospace, "Cascadia Mono", Consolas, monospace; color: var(--muted); }
+.pick .badge { font-size: 11px; font-weight: 600; color: var(--accent); margin-left: 6px; }
+#run-status.err { color: var(--accent); }
+.app button.quiet { background: var(--control); color: var(--ink); border: 1px solid var(--ring); }
+.app button.quiet.armed { background: var(--accent); color: #fff; border-color: var(--accent); }
+.app button#keep[aria-pressed="false"] { background: var(--control); color: var(--ink); border: 1px solid var(--ring); }
+.manage .explain { margin: 6px 0 0; }
+#trash-box { margin-top: 8px; font-size: 13px; }
+#trash-box summary { cursor: pointer; color: var(--ink-2); }
+.trash-row { border: 1px solid var(--hairline); border-radius: 8px; padding: 8px 10px; margin-top: 6px; }
+.trash-row .where { font-size: 12px; color: var(--muted); }
+.trash-row .row2 button { margin-top: 6px; font-size: 12px; padding: 6px 8px; }
+.foot { font-size: 12px; color: var(--muted); border-top: 1px solid var(--hairline); padding-top: 12px; }
+.foot p { margin: 0 0 6px; }
+/* popup + tooltip */
+.leaflet-popup-content-wrapper, .leaflet-tooltip { font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.pop h3 { margin: 0 0 6px; font-size: 14px; }
+.pop table { border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.pop td { padding: 2px 0; vertical-align: top; }
+.pop td:first-child { color: #52514e; padding-right: 14px; }
+.pop td:last-child { text-align: right; font-weight: 600; }
+.pop tr.sep td { border-top: 1px solid #e1e0d9; padding-top: 5px; }
+.pop .note { color: #898781; font-size: 12px; margin-top: 6px; max-width: 260px; }
+@media (max-width: 760px) {
+  body { grid-template-columns: 1fr; grid-template-rows: auto 60vh; height: auto; }
+  aside { border-right: 0; border-bottom: 1px solid var(--hairline); padding: 16px; }
+  #map { height: 60vh; }
+}
+</style>
+</head>
+<body>
+<aside>
+  <div>
+    <h1>Post-fire debris-flow hazard</h1>
+    <p class="sub">USGS models run by the Debris Flow Hunters pipeline</p>
+  </div>
+
+  <div>
+    <p class="label">Fire</p>
+    <div id="fire-switch"></div>
+    <div class="app manage" id="manage" hidden>
+      <div id="manage-fire">
+        <div class="row2">
+          <button type="button" id="keep" aria-pressed="false">Keep</button>
+          <button type="button" id="delete" class="quiet">Delete</button>
+        </div>
+      </div>
+      <p class="explain" id="manage-note"></p>
+      <details id="trash-box" hidden>
+        <summary id="trash-sum">Deleted fires</summary>
+        <div id="trash"></div>
+      </details>
+    </div>
+  </div>
+
+  <div class="app" id="run-panel" hidden>
+    <p class="label"><label for="run-name">Add a fire</label></p>
+    <form id="run-form">
+      <input id="run-name" placeholder="Fire name or ID, e.g. Rush or 2025-IDPAF-005844" required autocomplete="off">
+      <div class="row2">
+        <input id="run-year" type="number" min="2016" aria-label="Year">
+        <input id="run-state" maxlength="2" placeholder="State (if needed)" aria-label="State">
+      </div>
+      <button type="submit" id="run-find">Find fire</button>
+    </form>
+    <div class="picks" id="run-pick"></div>
+    <div class="app"><button type="button" id="run-go" hidden>Run assessment</button></div>
+    <p class="explain" id="run-status">Fetches the perimeter, elevation, soils and Sentinel-2
+      burn severity, then runs the USGS models. About 1 to 10 minutes.</p>
+  </div>
+
+  <div>
+    <p class="label"><label for="layer">Show</label></p>
+    <select id="layer"></select>
+    <p class="explain" id="explain"></p>
+    <div id="storm-ctl" hidden>
+      <div class="storm-head"><label for="storm">Storm, 15-minute intensity</label>
+        <span><b id="storm-val">24</b> mm/h</span></div>
+      <input type="range" id="storm" min="5" max="80" step="1" value="24"
+             aria-describedby="storm-note">
+      <div class="storm-scale"><span>5</span><span>light</span><span>heavy</span><span>80</span></div>
+      <p class="explain" id="storm-note"></p>
+    </div>
+  </div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="legend" id="legend"></div>
+
+  <details class="formula" id="formula-box" open>
+    <summary>How it's calculated</summary>
+    <div id="formula"></div>
+  </details>
+
+  <div class="toggles">
+    <p class="label">Background</p>
+    <label><input type="checkbox" id="t-sev" checked> Burn severity (<span id="sev-src">BAER</span>)</label>
+    <label><input type="checkbox" id="t-hs" checked> Terrain shading</label>
+    <label><input type="checkbox" id="t-osm"> Online street map (needs internet)</label>
+  </div>
+
+  <div id="export-panel" hidden>
+    <p class="label">Download this fire</p>
+    <div class="exports" id="exports"></div>
+    <p class="explain">Stream segments with M1 thresholds and likelihood, volume and hazard at
+      USGS's design storms; the geodatabase and shapefiles add basins, outlets and the
+      perimeter.</p>
+  </div>
+
+  <div class="foot" id="foot"></div>
+</aside>
+<div id="map" role="region" aria-label="Hazard map"></div>
+
+<script>/*LEAFLET_JS*/</script>
+<script>
+/*DATA*/
+
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const RAMP = [0, 1, 2, 3, 4, 5].map(i => css(`--r${i}`));
+const NONE = css("--none");
+
+// Each view: which field, how to bin it (bins run least -> most hazardous), how to label it.
+const STORM = { i: 24 };
+const logistic = x => 1 / (1 + Math.exp(-x));
+// Likelihood at the slider storm, from the formulas verified against wildcat's output
+function stormP(p, idx) {
+  const T = p[idx.Terrain_M1], F = p[idx.Fire_M1], S = p[idx.Soil_M1];
+  if (T === null || F === null || S === null) return null;
+  return logistic(-3.63 + (0.41 * T + 0.67 * F + 0.70 * S) * STORM.i * 0.25);
+}
+// Gartner 2014 emergency volume at the slider storm (matches wildcat to machine precision;
+// no moderate/high burned area gives ln 0 = -inf, so V = 0, as in wildcat)
+function stormV(p, idx) {
+  const B = p[idx.Bmh_km2], R = p[idx.Relief_m];
+  if (B === null || R === null) return null;
+  return Math.exp(4.22 + 0.39 * Math.sqrt(STORM.i) + 0.36 * Math.log(B) + 0.13 * Math.sqrt(R));
+}
+const V_RANGE = Math.exp(1.959964 * 1.04);   // 95% interval: V ÷ and × this (RSE 1.04)
+// Cannon 2010 scoring exactly as wildcat configures pfdf (classify = digitize, right=True)
+const P_EDGES = [0.2, 0.4, 0.6, 0.8], V_EDGES = [1e3, 1e4, 1e5], H_EDGES = [3, 6];
+const score = (x, edges) => 1 + edges.filter(e => x > e).length;
+function stormHazard(p, idx) {
+  const P = stormP(p, idx), V = stormV(p, idx);
+  if (P === null || V === null) return null;
+  const ps = score(P, P_EDGES), vs = score(V, V_EDGES);
+  return { P, V, ps, vs, tot: ps + vs, cls: score(ps + vs, H_EDGES) };
+}
+// Views with `storm` follow the slider.
+const VIEWS = {
+  storm: {
+    label: "Likelihood (drag the storm)", storm: true,
+    get name() { return `Likelihood at ${STORM.i} mm/h (USGS M1)`; },
+    value: stormP, upperInclusive: true, unit: "",
+    explain: "Pick a storm and see where it would trigger debris flows. A stream at 50% or " +
+             "more is one whose rainfall threshold this storm meets or exceeds.",
+    bins: [[-Infinity, 0.2, "20% or less"], [0.2, 0.4, "20 to 40%"], [0.4, 0.6, "40 to 60%"],
+           [0.6, 0.8, "60 to 80%"], [0.8, Infinity, "over 80%"]],
+    colors: [0, 1, 2, 4, 5],
+    noneLabel: "No estimate (no soil data)",
+    fmt: v => Math.round(v * 100) + "%",
+  },
+  m1: {
+    name: "Rainfall threshold: USGS M1",
+    field: "I15_50", unit: "mm/h",
+    explain: "15-minute rainfall intensity at which a debris flow becomes 50% likely. " +
+             "Lower means less rain is needed, so darker streams are more dangerous.",
+    bins: [[55, Infinity, "55 mm/h or more"], [40, 55, "40 to 55"], [30, 40, "30 to 40"],
+           [25, 30, "25 to 30"], [20, 25, "20 to 25"], [-Infinity, 20, "under 20 mm/h"]],
+    colors: [0, 1, 2, 3, 4, 5], noneLabel: "No threshold (no soil data)",
+    fmt: v => v.toFixed(1),
+  },
+  hazard: {
+    label: "Combined hazard (drag the storm)", storm: true,
+    get name() { return `Combined hazard at ${STORM.i} mm/h`; },
+    value: (p, idx) => { const h = stormHazard(p, idx); return h && h.cls; }, unit: "",
+    explain: "USGS combined class (Cannon 2010): a likelihood score plus a volume score, " +
+             "both at the storm on the slider. Click a stream to see its two scores.",
+    bins: [[-Infinity, 1.5, "Low · total score 3 or less"], [1.5, 2.5, "Moderate · total 4 to 6"],
+           [2.5, Infinity, "High · total 7 or more"]],
+    colors: [0, 3, 5],
+    noneLabel: "No class (no soil data)",
+    fmt: v => ["", "Low", "Moderate", "High"][v] || v,
+  },
+  volume: {
+    label: "Potential volume (drag the storm)", storm: true,
+    get name() { return `Potential volume at ${STORM.i} mm/h`; },
+    value: stormV, unit: "m³", upperInclusive: true,
+    explain: "Estimated sediment volume if a debris flow happens (Gartner 2014). At Grizzly " +
+             "Creek this model overestimated measured volumes about 6×; read it as relative size.",
+    bins: [[-Infinity, 1e3, "1,000 m³ or less · hazard score 1"], [1e3, 1e4, "1,000 to 10,000 · score 2"],
+           [1e4, 1e5, "10,000 to 100,000 · score 3"], [1e5, Infinity, "over 100,000 m³ · score 4"]],
+    colors: [0, 2, 3, 5], noneLabel: "No estimate",
+    fmt: v => Math.round(v).toLocaleString() + " m³",
+  },
+};
+const ORDER = ["storm", "hazard", "volume", "m1"];   // dropdown order
+
+const map = L.map("map", { preferCanvas: true, zoomControl: true, attributionControl: true });
+// Background images get their own panes below the overlay pane, so they always sit
+// beneath the stream canvas whatever order layers are added or toggled in.
+map.createPane("terrain").style.zIndex = 250;
+map.createPane("severity").style.zIndex = 260;
+map.createPane("casing").style.zIndex = 390;
+// White outlines get their own canvas under the streams: sharing one canvas let the
+// "most hazardous on top" re-ordering put some outlines over their own stream.
+const casingRenderer = L.canvas({ padding: 0.5, pane: "casing" });
+const renderer = L.canvas({ padding: 0.5, tolerance: 6 });
+const osm = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+  { maxZoom: 17, attribution: "© OpenStreetMap contributors" });
+
+let fire = FIRES[0], view = "storm", groups = {}, openLine = null;
+
+const valueOf = (props, idx, spec) => spec.value ? spec.value(props, idx) : props[idx[spec.field]];
+
+function binOf(v, spec) {
+  if (v === null || v === undefined) return -1;
+  return spec.bins.findIndex(([lo, hi]) =>
+    spec.upperInclusive ? v > lo && v <= hi : v >= lo && v < hi);
+}
+
+function buildFire(f) {
+  const idx = Object.fromEntries(f.segments.fields.map((k, i) => [k, i]));
+  const casing = L.layerGroup(), lines = L.layerGroup();
+  const rows = f.segments.lines.map((coords, i) => ({ coords, p: f.segments.props[i] }));
+  const items = rows.map(r => {
+    const ll = r.coords.map(([x, y]) => [y, x]);
+    const area = r.p[idx.Area_km2] || 0.05;
+    const w = Math.max(1.6, Math.min(4.2, 1.6 + 1.1 * Math.log10(area / 0.025 + 1)));
+    const c = L.polyline(ll, { renderer: casingRenderer, pane: "casing", color: "#ffffff", weight: w + 3.5, opacity: 1, interactive: false });
+    const l = L.polyline(ll, { renderer, weight: w, opacity: 1, lineCap: "round" });
+    l.props = r.p; l.baseWeight = w;
+    l.on("mouseover", () => { l.setStyle({ weight: w + 3 }); l.bringToFront(); });
+    l.on("mouseout", () => l.setStyle({ weight: w }));
+    l.bindTooltip(() => tooltip(l.props, idx), { sticky: true, direction: "top", opacity: 0.95 });
+    l.bindPopup(() => popup(l.props, idx), { maxWidth: 320 });
+    l.on("popupopen", () => { openLine = l; });
+    l.on("popupclose", () => { if (openLine === l) openLine = null; });
+    casing.addLayer(c); lines.addLayer(l);
+    return l;
+  });
+  const hs = L.imageOverlay(f.hillshade.uri, f.hillshade.bounds, { opacity: 1, pane: "terrain" });
+  const sev = L.imageOverlay(f.severity.uri, f.severity.bounds, { opacity: 1, pane: "severity" });
+  const per = L.geoJSON(f.perimeter, { style: { color: "#3a3936", weight: 1.6, dashArray: "5 4", fill: false }, interactive: false });
+  return { idx, casing, lines, items, hs, sev, per };
+}
+
+function style() {
+  if (!fire || !groups[fire.key]) return;          // no fire on the map yet
+  const spec = VIEWS[view], g = groups[fire.key];
+  // Draw less hazardous first so the most hazardous streams sit on top
+  const order = g.items.map(l => ({ l, b: binOf(valueOf(l.props, g.idx, spec), spec) }))
+                       .sort((a, b) => a.b - b.b);
+  for (const { l, b } of order) { paint(l, b, spec); l.bringToFront(); }
+  panel();
+}
+
+function paint(l, b, spec) {
+  const key = view;
+  if (l.bin === b && l.spec === key) return;
+  l.bin = b; l.spec = key;
+  if (b < 0) l.setStyle({ color: NONE, dashArray: "4 4", opacity: 0.9 });
+  else l.setStyle({ color: RAMP[spec.colors[b]], dashArray: null, opacity: 1 });
+}
+
+// While the slider moves, only recolour streams whose band changed; re-stack on release
+function restyleStorm() {
+  if (!fire || !groups[fire.key]) return;
+  const spec = VIEWS[view], g = groups[fire.key];
+  if (openLine) openLine.setPopupContent(popup(openLine.props, g.idx));
+  if (!spec.storm) return;
+  for (const l of g.items) paint(l, binOf(spec.value(l.props, g.idx), spec), spec);
+  panel();
+}
+
+function panel() {
+  legend(); tiles(); formula();
+  const spec = VIEWS[view];
+  document.getElementById("storm-ctl").hidden = !spec.storm;
+  if (spec.storm) {
+    document.getElementById("storm-val").textContent = STORM.i;
+    document.getElementById("storm-note").textContent =
+      "USGS's design storms are 16, 20, 24 and 40 mm/h (15-minute intensity).";
+  }
+}
+
+function tooltip(p, idx) {
+  const spec = VIEWS[view], v = valueOf(p, idx, spec);
+  return `<b>${v === null ? spec.noneLabel : spec.fmt(v) + (spec.unit && spec.unit !== "m³" ? " " + spec.unit : "")}</b>` +
+         `<br><span style="color:#52514e">${spec.name}</span>`;
+}
+
+function popup(p, idx) {
+  const g = k => p[idx[k]];
+  const f1 = v => v === null ? "–" : v.toFixed(1);
+  const m3 = v => Math.round(v).toLocaleString();
+  const row = (k, v, sep) => `<tr${sep ? ' class="sep"' : ""}><td>${k}</td><td>${v}</td></tr>`;
+  const hz = ["–", "Low", "Moderate", "High"];
+  const P = stormP(p, idx), V = stormV(p, idx), h = stormHazard(p, idx);
+  let why = "";
+  if (h) {
+    const next = h.cls === 1 ? "Moderate needs 4" : h.cls === 2 ? "High needs 7" : "High is 7 or more";
+    why = `<p class="note"><b>Why ${hz[h.cls]}:</b> likelihood ${Math.round(P * 100)}% scores ${h.ps}, ` +
+          `volume ${m3(V)} m³ scores ${h.vs}; total ${h.ps} + ${h.vs} = ${h.tot} (${next}).</p>`;
+  }
+  return `<div class="pop"><h3>Stream segment ${g("Segment_ID")}</h3><table>` +
+    row(`<b>Storm: ${STORM.i} mm/h</b>`, "") +
+    row("Likelihood", P === null ? "–" : Math.round(P * 100) + "%") +
+    row("Volume", V === null ? "–" : m3(V) + " m³") +
+    row("95% range", V === null || V === 0 ? "–" : `${m3(V / V_RANGE)}–${m3(V * V_RANGE)} m³`) +
+    row("Combined hazard", h ? hz[h.cls] : "–") +
+    row("Threshold, USGS M1", g("I15_50") === null ? "none" : f1(g("I15_50")) + " mm/h", true) +
+    row("Drainage area", g("Area_km2") === null ? "–" : g("Area_km2").toFixed(2) + " km²", true) +
+    row("Steep & burned share (T)", g("Terrain_M1") === null ? "–" : Math.round(g("Terrain_M1") * 100) + "%") +
+    row("Mean dNBR / 1000 (F)", g("Fire_M1") === null ? "–" : g("Fire_M1").toFixed(2)) +
+    row("Soil erodibility (S)", g("Soil_M1") === null ? "no data" : g("Soil_M1").toFixed(2)) +
+    row("Burned mod./high area", g("Bmh_km2") === null ? "–" : g("Bmh_km2").toFixed(2) + " km²") +
+    row("Relief", g("Relief_m") === null ? "–" : Math.round(g("Relief_m")) + " m") +
+    `</table>${why}<p class="note">Thresholds are for the first year after the fire. ` +
+    `Volume estimates run high (~6× measured at Grizzly Creek). Formulas: side panel.</p></div>`;
+}
+
+const M1_DEF = `<p><b>T</b> = share of the basin that is moderately/highly burned <i>and</i> steeper than 23°.
+  <b>F</b> = mean dNBR ÷ 1000. <b>S</b> = mean soil erodibility (KF).</p>`;
+const SCORE_TABLE = `<table>
+  <tr><th>Likelihood</th><th>Score</th><th>Volume (m³)</th><th>Score</th></tr>
+  <tr><td>≤ 20%</td><td>1</td><td>≤ 1,000</td><td>1</td></tr>
+  <tr><td>20–40%</td><td>2</td><td>1,000–10,000</td><td>2</td></tr>
+  <tr><td>40–60%</td><td>3</td><td>10,000–100,000</td><td>3</td></tr>
+  <tr><td>60–80%</td><td>4</td><td>&gt; 100,000</td><td>4</td></tr>
+  <tr><td>&gt; 80%</td><td>5</td><td></td><td></td></tr></table>
+  <p>Total = likelihood score + volume score: <b>≤ 3 Low, 4–6 Moderate, ≥ 7 High</b>.</p>`;
+const FORMULAS = {
+  m1: () => `<p>Likelihood (logistic model), for a 15-minute storm:</p>
+    <div class="eq">logit(p) = B + (C<sub>T</sub>·T + C<sub>F</sub>·F + C<sub>S</sub>·S) · R</div>
+    <p>R = 15-minute rain total in mm (intensity × 0.25 h). B = −3.63, C<sub>T</sub> = 0.41,
+       C<sub>F</sub> = 0.67, C<sub>S</sub> = 0.70.</p>
+    <p>Threshold = the rain that makes p = 50% (logit = 0):</p>
+    <div class="eq">R<sub>50</sub> = 3.63 / (0.41·T + 0.67·F + 0.70·S)<br>I<sub>15</sub> = R<sub>50</sub> / 0.25 h</div>
+    ${M1_DEF}<p class="src">Staley et al. 2017 (M1), as implemented in pfdf/wildcat.</p>`,
+  volume: () => `<p>Emergency volume model, for the storm on the slider:</p>
+    <div class="eq">ln V = 4.22 + 0.39·√${STORM.i}<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;+ 0.36·ln(B<sub>mh</sub>) + 0.13·√Relief</div>
+    <p>B<sub>mh</sub> = basin area burned at moderate/high severity (km²);
+       Relief = highest minus lowest point (m). 95% range: ln V ± 1.96 × 1.04, i.e. V ÷ or × 7.7.
+       Volume does not use the likelihood model: it is the size of a flow <i>if</i> one happens.</p>
+    <p>Its hazard score (1–4) feeds the combined hazard class:</p>${SCORE_TABLE}
+    <p class="src">Gartner et al. 2014 (emergency model). Overestimated measured volumes ~6× at Grizzly Creek.</p>`,
+  hazard: () => `<p>Not a separate model: a points system combining the M1 likelihood and the
+    volume, both at ${STORM.i} mm/h.</p>
+    ${SCORE_TABLE}<p class="src">Cannon et al. 2010, with USGS's likelihood breaks
+    (20/40/60/80%) as configured in wildcat. Click a stream to see its scores.</p>`,
+};
+
+FORMULAS.storm = () => `<p>USGS M1 likelihood for the storm on the slider (R = intensity × 0.25 h):</p>
+  <div class="eq">x = −3.63<br>&nbsp;&nbsp;+ (0.41·T + 0.67·F + 0.70·S) · ${STORM.i} × 0.25<br>p = 1 / (1 + e<sup>−x</sup>)</div>
+  <p>p = 50% exactly when the storm equals the stream's M1 threshold.</p>${M1_DEF}
+  <p>Its hazard score (1–5) feeds the combined hazard class:</p>${SCORE_TABLE}
+  <p class="src">Staley et al. 2017 (M1).</p>`;
+
+function formula() { document.getElementById("formula").innerHTML = FORMULAS[view](); }
+
+function legend() {
+  const spec = VIEWS[view];
+  const rows = spec.bins.map((b, i) => [RAMP[spec.colors[i]], b[2]]).reverse();
+  const hazardFirst = view === "m1";
+  const cap = hazardFirst ? "Darker = less rain needed"
+            : view === "storm" ? "Darker = more likely at this storm" : "Darker = more hazardous";
+  document.getElementById("legend").innerHTML =
+    `<p class="label">${spec.name}</p><div class="cap">${cap}</div>` +
+    rows.map(([c, t]) => `<div class="row"><span class="sw" style="background:${c}"></span>${t}</div>`).join("") +
+    `<div class="row"><span class="sw none"></span>${spec.noneLabel}</div>` +
+    `<p class="label" style="margin-top:10px">Burn severity</p>` +
+    [[4, "High"], [3, "Moderate"], [2, "Low"]].map(([k, t]) =>
+      `<div class="row"><span class="sev" style="background:rgba(${SEV[k]})"></span>${t}</div>`).join("") +
+    `<div class="row"><span class="sw none" style="background:none;border-top:1.6px dashed #3a3936;height:0;width:28px"></span>Fire perimeter</div>`;
+}
+const SEV = { 2: "214,208,196,0.59", 3: "150,142,128,0.67", 4: "92,84,72,0.75" };
+
+// What pipeline/usgs_check.py found: USGS's own figure and how ours compares, stream by stream
+function usgsNote() {
+  const c = fire.usgs_check;
+  if (c && c.found) {
+    let t = `USGS: ${(c.usgs_guidance ?? fire.usgs_median).toFixed(1)} mm/h (${c.code}); ours ` +
+            `${c.threshold_ratio.toFixed(2)}× on ${c.pairs.toLocaleString()} matched streams`;
+    if (c.note) t += `. ⚠ Burn imagery differs (our dNBR ${c.F_ratio.toFixed(2)}× theirs)`;
+    return t;
+  }
+  if (fire.usgs_median !== null && fire.usgs_median !== undefined)
+    return `USGS assessment: ${fire.usgs_median.toFixed(1)} mm/h`;
+  return c && c.found === false ? "No USGS assessment archived for this fire" : "No USGS assessment to compare";
+}
+
+function tiles() {
+  const s = fire.stats, spec = VIEWS[view], g = groups[fire.key];
+  const vals = g.items.map(l => valueOf(l.props, g.idx, spec)).filter(v => v !== null);
+  const top = spec.bins.length - 1;
+  const inTop = vals.filter(v => binOf(v, spec) === top).length;
+  const pct = vals.length ? Math.round(100 * inTop / vals.length) : 0;
+  const likely = vals.filter(v => v >= 0.5).length;
+  const last = view === "storm"
+    ? `<div class="tile"><div class="k">Likely debris flows (50%+)</div>
+         <div class="v">${likely.toLocaleString()}</div>
+         <div class="n">${vals.length ? Math.round(100 * likely / vals.length) : 0}% of ${vals.length.toLocaleString()} streams</div></div>`
+    : `<div class="tile"><div class="k">In the darkest class</div>
+         <div class="v">${pct}<small>%</small></div>
+         <div class="n">${spec.bins[top][2]}</div></div>`;
+  document.getElementById("tiles").innerHTML = `
+    <div class="tile"><div class="k">Median threshold, M1</div>
+      <div class="v">${s.m1_median === null ? "–" : s.m1_median.toFixed(1)}<small>mm/h</small></div>
+      <div class="n">${usgsNote()}</div></div>
+    <div class="tile"><div class="k">Burn severity</div>
+      <div class="v">${{BAER: "BAER", BARC: "BARC"}[fire.severity_source] || "Estimated"}</div>
+      <div class="n">${{BAER: "Field-checked soil burn severity",
+                        BARC: "Satellite classification, not field-checked"}[fire.severity_source]
+                       || "From dNBR at 125/250/500"}</div></div>
+    <div class="tile"><div class="k">Stream segments</div>
+      <div class="v">${s.n.toLocaleString()}</div>
+      <div class="n">${s.no_m1} without an M1 threshold</div></div>
+    ${last}`;
+}
+
+function footer() {
+  document.getElementById("foot").innerHTML =
+    `<p><b>${fire.name} Fire, ${fire.year} (${fire.state}).</b>${fire.unique_id ? ` Fire ID ${fire.unique_id}.` : ""} ` +
+    `Inputs: ${fire.inputs}.</p>` +
+    `<p>Models: USGS M1 likelihood (Staley et al. 2017), Gartner et al. 2014 volume, ` +
+    `Cannon et al. 2010 combined hazard, via wildcat/pfdf.</p>` +
+    `<p>Research prototype. Not an official USGS product and not for operational decisions.</p>`;
+}
+
+// In the app FIRES holds summaries; a fire's layers are fetched the first time it is shown
+async function loadFire(f) {
+  if (f.segments) return;
+  const r = await fetch(`api/fires/${encodeURIComponent(f.key)}`);
+  if (!r.ok) throw new Error((await r.json()).error || r.statusText);
+  Object.assign(f, await r.json());
+}
+
+async function showFire(key) {
+  const next = FIRES.find(f => f.key === key);
+  if (!next.segments) {
+    fireSwitch.style.opacity = 0.5;
+    try { await loadFire(next); } finally { fireSwitch.style.opacity = 1; }
+  }
+  if (fire && groups[fire.key]) for (const k of ["casing", "lines", "hs", "sev", "per"]) map.removeLayer(groups[fire.key][k]);
+  fire = next;
+  if (!groups[key]) groups[key] = buildFire(fire);
+  const g = groups[key];
+  if (document.getElementById("t-hs").checked) g.hs.addTo(map);
+  if (document.getElementById("t-sev").checked) g.sev.addTo(map);
+  g.per.addTo(map); g.casing.addTo(map); g.lines.addTo(map);
+  map.fitBounds(g.per.getBounds(), { padding: [20, 20] });
+  document.querySelectorAll("#fire-switch button").forEach(b => b.setAttribute("aria-pressed", b.dataset.key === key));
+  const fs = document.querySelector("#fire-switch select");
+  if (fs) fs.value = key;
+  document.getElementById("sev-src").textContent = fire.severity_source;
+  if (APP) document.getElementById("exports").innerHTML =
+    [["geojson", "GeoJSON"], ["csv", "CSV table"], ["shp", "Shapefiles"], ["gdb", "File geodatabase"]]
+      .map(([f, t]) => `<a href="api/fires/${encodeURIComponent(fire.key)}/export?format=${f}">${t}</a>`).join("");
+  footer(); style();
+  if (APP) renderManage();
+}
+
+// App only: keep (protect from deletion) and delete (to "Deleted fires", restorable)
+const mb = b => b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.max(0.1, b / 1e6).toFixed(1)} MB`;
+let armTimer = null;
+function arm(btn, label, armedLabel) {
+  // two clicks to destroy, no browser dialog: the first arms the button for 8 s
+  if (btn.classList.contains("armed")) { clearTimeout(armTimer); return true; }
+  document.querySelectorAll(".armed").forEach(b => { b.classList.remove("armed"); b.textContent = b.dataset.label; });
+  btn.dataset.label = label; btn.textContent = armedLabel; btn.classList.add("armed");
+  armTimer = setTimeout(() => { btn.classList.remove("armed"); btn.textContent = label; }, 8000);
+  return false;
+}
+function renderManage(note) {
+  const keep = document.getElementById("keep"), del = document.getElementById("delete");
+  document.getElementById("manage-fire").hidden = !FIRES.length;
+  if (!FIRES.length) {      // nothing to keep or delete: say how to start
+    document.getElementById("manage-note").textContent = note || "No fires yet. Add one below.";
+    return;
+  }
+  keep.setAttribute("aria-pressed", !!fire.kept);
+  keep.textContent = fire.kept ? "Kept" : "Keep";
+  del.classList.remove("armed"); del.textContent = "Delete"; del.disabled = !!fire.kept;
+  document.getElementById("manage-note").textContent = note ||
+    (fire.kept ? "Kept: protected from deletion. Click Kept to allow deleting it."
+               : "Not kept: added here and not yet saved. Keep it, or delete it.");
+}
+async function post(url, body) {
+  const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
+                               body: JSON.stringify(body || {}) });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+async function refreshFires() {
+  const known = new Set(FIRES.map(f => f.key));
+  for (const f of await (await fetch("api/fires")).json()) if (!known.has(f.key)) FIRES.push(f);
+  renderFireSwitch();
+}
+async function renderTrash() {
+  const list = await (await fetch("api/trash")).json();
+  const box = document.getElementById("trash-box");
+  box.hidden = !list.length;
+  document.getElementById("trash-sum").textContent = `Deleted fires (${list.length})`;
+  document.getElementById("trash").innerHTML = list.map(t => `<div class="trash-row">
+      <b>${t.name} ${t.year}</b> <span class="where">${t.state} · ${mb(t.bytes)} · deleted ${new Date(t.deleted * 1000).toLocaleString()}</span>
+      <div class="row2"><button type="button" data-restore="${t.id}">Restore</button>
+        <button type="button" class="quiet" data-purge="${t.id}">Delete permanently</button></div></div>`).join("");
+  document.querySelectorAll("[data-restore]").forEach(b => b.addEventListener("click", async () => {
+    try {
+      const r = await post(`api/trash/${b.dataset.restore}/restore`);
+      await refreshFires(); await renderTrash(); await showFire(r.restored);
+      renderManage("Restored.");
+    } catch (e) { document.getElementById("manage-note").textContent = e.message; }
+  }));
+  document.querySelectorAll("[data-purge]").forEach(b => b.addEventListener("click", async () => {
+    if (!arm(b, "Delete permanently", "Click again: files are removed")) return;
+    try { await post(`api/trash/${b.dataset.purge}/purge`); await renderTrash(); }
+    catch (e) { document.getElementById("manage-note").textContent = e.message; }
+  }));
+}
+if (APP) {
+  document.getElementById("manage").hidden = false;
+  document.getElementById("keep").addEventListener("click", async () => {
+    try {
+      const r = await post(`api/fires/${encodeURIComponent(fire.key)}/keep`, { kept: !fire.kept });
+      fire.kept = r.kept; renderFireSwitch(); renderManage();
+    } catch (e) { renderManage(e.message); }
+  });
+  document.getElementById("delete").addEventListener("click", async e => {
+    const del = e.currentTarget;
+    if (!arm(del, "Delete", `Click again to delete ${fire.name}`)) return;
+    try {
+      const gone = fire, r = await post(`api/fires/${encodeURIComponent(gone.key)}/delete`);
+      if (groups[gone.key]) {
+        for (const k of ["casing", "lines", "hs", "sev", "per"]) map.removeLayer(groups[gone.key][k]);
+        delete groups[gone.key];
+      }
+      FIRES.splice(FIRES.indexOf(gone), 1);
+      renderFireSwitch(); await renderTrash();
+      if (FIRES.length) await showFire(FIRES[0].key);
+      else fire = null;
+      renderManage(`${gone.name} ${gone.year} moved to Deleted fires (${mb(r.bytes)}); restore it below.`);
+    } catch (err) { renderManage(err.message); }
+  });
+  renderTrash();
+}
+
+function toggleOverlay(id, key) {
+  document.getElementById(id).addEventListener("change", e => {
+    const g = groups[fire.key];
+    if (key === "osm") { e.target.checked ? osm.addTo(map) : map.removeLayer(osm); return; }
+    e.target.checked ? g[key].addTo(map) : map.removeLayer(g[key]);
+  });
+}
+
+// controls
+// Two fires fit a segmented switch; more get a dropdown
+const fireSwitch = document.getElementById("fire-switch");
+function renderFireSwitch() {
+  if (FIRES.length <= 2) {
+    fireSwitch.className = "seg"; fireSwitch.setAttribute("role", "group"); fireSwitch.setAttribute("aria-label", "Fire");
+    fireSwitch.innerHTML = FIRES.map(f =>
+      `<button data-key="${f.key}" aria-pressed="${!!fire && f.key === fire.key}">${f.name} ${f.year}</button>`).join("");
+    fireSwitch.querySelectorAll("button").forEach(b => b.addEventListener("click", () => showFire(b.dataset.key)));
+  } else {
+    fireSwitch.className = ""; fireSwitch.removeAttribute("role");
+    fireSwitch.innerHTML = `<select aria-label="Fire">` + FIRES.map(f =>
+      `<option value="${f.key}">${f.name} ${f.year} (${f.state})${APP && f.kept === false ? " · not kept" : ""}</option>`).join("") + `</select>`;
+    if (fire) fireSwitch.querySelector("select").value = fire.key;
+    fireSwitch.querySelector("select").addEventListener("change", e => showFire(e.target.value));
+  }
+}
+renderFireSwitch();
+
+// App only: run the pipeline for a new fire, follow it, then add it to the list and show it
+if (APP) {
+  document.getElementById("run-panel").hidden = false;
+  document.getElementById("export-panel").hidden = false;
+  const year = document.getElementById("run-year");
+  year.max = new Date().getFullYear(); year.value = year.max;
+  const status = document.getElementById("run-status"), go = document.getElementById("run-go");
+  const say = (text, err) => { status.textContent = text; status.classList.toggle("err", !!err); };
+  const $ = id => document.getElementById(id), pick = $("run-pick");
+  const UID = /^\d{4}-[A-Za-z]{2}[A-Za-z0-9]{2,6}-[A-Za-z0-9]{1,10}$/;
+  let cards = [], chosen = null;
+
+  // 1. Find: WFIGS candidates for a name and year (and state), or one Unique Fire ID
+  $("run-form").addEventListener("submit", async e => {
+    e.preventDefault();
+    const raw = $("run-name").value.trim();
+    const qs = UID.test(raw) ? `id=${encodeURIComponent(raw)}`
+      : `name=${encodeURIComponent(raw)}&year=${year.value}&state=${encodeURIComponent($("run-state").value.trim())}`;
+    say("Searching WFIGS…"); pick.innerHTML = ""; go.hidden = true; chosen = null;
+    const r = await fetch(`api/lookup?${qs}`), body = await r.json();
+    if (!r.ok) return say(body.error, true);
+    cards = body.candidates;
+    if (!cards.length) return say(`No fire matches ${UID.test(raw) ? raw : `"${raw}" in ${year.value}`}. ` +
+                                  "Check the spelling and year (WFIGS names, e.g. \"Big Bear\").", true);
+    pick.innerHTML = cards.map((c, i) => `<button type="button" class="pick" data-i="${i}" aria-pressed="false">
+        <b>${c.name}</b>${c.on_map ? '<span class="badge">on map</span>' : ""}
+        <div class="where">${c.county ? c.county + " County, " : ""}${c.state} · ${c.acres.toLocaleString()} acres</div>
+        <div class="uid">${c.unique_id} · found ${c.discovered}</div></button>`).join("");
+    pick.querySelectorAll(".pick").forEach(b => b.addEventListener("click", () => choose(+b.dataset.i)));
+    if (cards.length === 1) choose(0);
+    else say(`${cards.length}${body.more ? "+" : ""} fires match. Pick one:`);
+  });
+
+  // 2. Pick: fill in the fields from the chosen fire and offer the next step
+  function choose(i) {
+    chosen = cards[i];
+    pick.querySelectorAll(".pick").forEach(b => b.setAttribute("aria-pressed", +b.dataset.i === i));
+    $("run-name").value = chosen.name; year.value = chosen.year; $("run-state").value = chosen.state;
+    go.hidden = false;
+    go.textContent = chosen.on_map ? "Show on map" : "Run assessment";
+    say(chosen.on_map ? `${chosen.name} ${chosen.year} is already assessed.`
+                      : `${chosen.name} ${chosen.year} (${chosen.unique_id}) is ready to run.`);
+  }
+
+  // 3. Run (or show): by Unique Fire ID, then follow the run to the map
+  go.addEventListener("click", async () => {
+    if (!chosen) return;
+    if (chosen.on_map) return showFire(chosen.on_map);
+    const r = await fetch("api/runs", { method: "POST", headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({ unique_id: chosen.unique_id }) });
+    const run = await r.json();
+    if (!r.ok) return say(run.error, true);
+    if (run.existing) { say(`${run.name} ${run.year} is already assessed; showing it.`); return showFire(run.fire_key); }
+    go.disabled = true; $("run-find").disabled = true;
+    const poll = setInterval(async () => {
+      const s = await (await fetch(`api/runs/${run.id}`)).json();
+      if (s.status === "queued" || s.status === "running")
+        return say(`${s.name} ${s.year}: ${s.stage_label}… (${s.elapsed_s} s)`);
+      clearInterval(poll); go.disabled = false; $("run-find").disabled = false;
+      if (s.status === "failed") return say(`${s.name} ${s.year} did not run:\n${s.error}`, true);
+      say(`${s.name} ${s.year} done in ${s.elapsed_s} s.`);
+      const known = new Set(FIRES.map(f => f.key));
+      for (const f of await (await fetch("api/fires")).json()) if (!known.has(f.key)) FIRES.push(f);
+      renderFireSwitch();
+      if (s.fire_key) { chosen.on_map = s.fire_key; go.textContent = "Show on map"; showFire(s.fire_key); }
+    }, 2000);
+  });
+}
+const sel = document.getElementById("layer");
+sel.innerHTML = ORDER.map(k => `<option value="${k}">${VIEWS[k].label || VIEWS[k].name}</option>`).join("");
+sel.addEventListener("change", () => { view = sel.value; document.getElementById("explain").textContent = VIEWS[view].explain; style(); });
+document.getElementById("explain").textContent = VIEWS[view].explain;
+const slider = document.getElementById("storm");
+let pending = false;
+slider.addEventListener("input", () => {
+  STORM.i = +slider.value;
+  if (!pending) { pending = true; requestAnimationFrame(() => { pending = false; restyleStorm(); }); }
+});
+slider.addEventListener("change", () => style());
+toggleOverlay("t-hs", "hs"); toggleOverlay("t-sev", "sev"); toggleOverlay("t-osm", "osm");
+map.attributionControl.setPrefix("Leaflet");
+if (FIRES.length) showFire(FIRES[0].key);
+else {                        // an empty app: the western US, and a pointer to "Add a fire"
+  map.setView([42, -114], 5);
+  if (APP) renderManage();
+}
+</script>
+</body>
+</html>

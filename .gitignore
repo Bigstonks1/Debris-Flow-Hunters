@@ -216,3 +216,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project data: downloads, wildcat projects, results, the app's trash and exports
+data/
+
+# Generated: the offline map (map/build_map.py), Slurm job logs, browser test output
+map/dist/
+logs/
+.playwright-mcp/

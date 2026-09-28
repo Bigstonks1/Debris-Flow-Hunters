@@ -1,0 +1,3 @@
+# Batch scripts run on Linux (Slurm); sbatch rejects Windows line endings
+*.slurm text eol=lf
+*.sh    text eol=lf
