@@ -27,6 +27,34 @@ The intended users are land managers and emergency managers.
 - **Exports**: GeoJSON, CSV, zipped shapefiles, or a zipped Esri file geodatabase (no ArcGIS
   needed).
 - **A comparison with USGS's own assessment** of the same fire, when USGS has published one.
+- **A record of where every input came from**, shown in the app under **Logs > Input data
+  for this fire**.
+
+## Where the data comes from
+
+Every input is downloaded from a public service. All of them are free and need no account,
+key or email. When the first choice is missing or unavailable, the pipeline falls back to
+the next one and records which it used.
+
+| Input | First choice | Fallbacks, in order |
+|---|---|---|
+| Fire perimeter | WFIGS interagency perimeter | – |
+| Elevation (10 m) | USGS 3DEP tiles (The National Map) | the same tiles from USGS's 3DEP elevation service, if the first is down |
+| Burn imagery (dNBR) | the BAER files USGS published with its own assessment | Sentinel-2, one clear date before and after the fire → Sentinel-2 built from several dates → Landsat 8/9 single dates → Landsat 8/9 built from several dates |
+| Burn severity | the BAER map USGS published | the Forest Service BAER team's map → estimated from the burn imagery |
+| Soil erodibility | STATSGO | SSURGO (USDA), rescaled to STATSGO → the fire's median value |
+| Vegetation (masks water and towns) | LANDFIRE, from the fire's RECOVER package | LANDFIRE's public service → none |
+
+A few things worth knowing:
+- **Burn severity matters most.** A field-checked BAER map gives results much closer to
+  USGS's than an estimate (Wapiti 2024: 0.95 of USGS's thresholds against 0.88).
+- **Fires that cross the border into Mexico or Canada** are modeled on the US side only,
+  where there is US elevation data. The app says how much area was left out.
+- **Dates are refreshed** from WFIGS on every run, so a fire first run while it was still
+  burning gets its final containment date. Other downloads (elevation, soils, vegetation)
+  are kept after the first run; `--cold` downloads them again.
+
+`design.md` §4 explains why each source and fallback was chosen, and lists the exact APIs.
 
 ## Install
 
@@ -91,8 +119,9 @@ repository there and run `uv sync` once. Then open **Settings: HPC cluster** and
 - the Slurm partition.
 
 Click **Test connection**. If your SSH key is already on the cluster, nothing else is needed.
-If the cluster needs a password, save it in the settings. It is stored in your system's password store (Windows Credential Manager, macOS Keychain,
-or the keyring on a Linux desktop), never in a file. Batches then offer the cluster as a place to run. The batch runs
+If the cluster needs a password, save it in the settings. It is stored in your system's
+password store (Windows Credential Manager, macOS Keychain, or the keyring on a Linux
+desktop), never in a file. Batches then offer the cluster as a place to run. The batch runs
 there on its own, and the app copies each finished fire back to this computer.
 
 ### One fire from the command line
@@ -100,6 +129,9 @@ there on its own, and the app copies each finished fire back to this computer.
 ```bash
 uv run python pipeline/run_fire.py --id 2025-IDPAF-005844     # by Unique Fire ID
 uv run python pipeline/run_fire.py "Rush" 2025 ID             # by name, year, state
+uv run python pipeline/run_fire.py --id <ID> --cold           # download every input again
+uv run python pipeline/run_fire.py --id <ID> --kf-fill none   # leave soil gaps empty, as USGS does
+uv run python pipeline/run_fire.py --id <ID> --no-baer-sbs    # skip the Forest Service BAER map
 ```
 
 Results go to `data/<fire>_<inputs>/exports/` (shapefiles). `uv run python map/build_map.py`
@@ -142,9 +174,10 @@ cluster whose compute nodes can download, `--compute-internet` runs each whole f
 array instead.
 
 The 1 m job splits the fire into drainage pieces and runs them as a job array, one piece
-per node; see `design.md`, "Watershed split". Submit from the repository's folder: the scripts run in the folder
-they were submitted from (default `~/scratch/Debris-Flow-Hunters`). The app can also submit runs to Slurm when it runs on the
-cluster: `uv run python app/server.py --runner slurm`.
+per node; see `design.md`, "Watershed split". Submit from the repository's folder: the
+scripts run in the folder they were submitted from (default `~/scratch/Debris-Flow-Hunters`).
+The app can also submit runs to Slurm when it runs on the cluster:
+`uv run python app/server.py --runner slurm`.
 
 ## Where things are
 

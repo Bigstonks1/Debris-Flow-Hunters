@@ -28,6 +28,7 @@ uv run python app/server.py --runner slurm               # app submitting runs t
                                                          # batches to any cluster: Settings > HPC in the app
 uv run python pipeline/run_fire.py --id 2025-IDPAF-005844   # one fire end to end, by Unique Fire ID
 uv run python pipeline/run_fire.py "Rush" 2025 ID        # by name, year, state
+uv run python pipeline/run_fire.py --id <UID> --cold     # delete the fire's cached downloads first
 uv run python pipeline/run_fire.py --id <UID> --split --workers 4   # wildcat by watershed pieces
 uv run python pipeline/run_fire.py --id <UID> --kf-fill none        # KF gaps left empty, as USGS does (default: SSURGO, then median)
 uv run python pipeline/run_fire.py --id <UID> --no-baer-sbs         # skip the Forest Service BAER severity map
@@ -81,12 +82,34 @@ exists yet; if you add tests, add the runner to `pyproject.toml` and list it her
 - **Slurm scripts end in `.slurm`** and run in the folder they were submitted from
   (`SLURM_SUBMIT_DIR`, default `~/scratch/Debris-Flow-Hunters`).
 - **HPC credentials never go in files.** The app's cluster password lives in the OS
-  password store via `keyring` (`app/hpc.py`; Credential Manager, Keychain or Secret Service); `data/hpc_settings.json` holds no secrets
-  and API responses only say whether one is saved. Keep it that way, and keep anything typed
+  password store via `keyring` (`app/hpc.py`; Credential Manager, Keychain or Secret
+  Service); `data/hpc_settings.json` holds no secrets and API responses only say whether
+  one is saved. Keep it that way, and keep anything typed
   in the page out of remote shell commands unless validated or `shlex.quote`d.
 - **App batches read `pipeline/batch.py`'s files** (`fires.tsv`, `status/*.json`), locally
   and over SFTP. Changing their format breaks the app's Batches panel and HPC copy-back.
-- More traps (DEM projection, nodata labels, WFIGS geometry, Windows GDAL hangs): `design.md` §9.
+- **Every input source must be free and need no account, key or email** (`design.md` §4.4).
+  Earth Search's Landsat files are requester-pays: Landsat comes from the Planetary Computer.
+- **Inputs fall back in a fixed order** (`design.md` §4 table): USGS-published burn inputs,
+  then the Forest Service BAER map (`pipeline/baer_sbs.py`), then estimated severity;
+  Sentinel-2 single dates, composite, then Landsat (`pipeline/sentinel2_dnbr.py`); STATSGO KF,
+  then SSURGO (`pipeline/soils.py`), then the fire median; TNM S3 DEM, then the 3DEP image
+  service. Every choice is written to the project's `sources.json`, which the app shows.
+  Never fall back silently.
+- **Project kinds live in one list**, `fires.PROJECT_SUFFIXES` (`_usgs_usgs`,
+  `_s2_auto_baersbs`, `_s2_auto_estimate`, in order of preference) with
+  `fires.finished_project()`. Add a new kind there, not in each caller.
+- **STATSGO KF gaps are 0 (sometimes -0.1), not nodata**, and SSURGO is on a different
+  scale (Wapiti 0.74x STATSGO): test `kf > 0` and rescale before mixing (`prepare_fire.fill_kf`).
+- **A perimeter crossing the border is clipped** to where the DEM has data
+  (`prepare_fire.main`); fires inside US coverage are untouched. The run stops only when no
+  part of the perimeter has elevation.
+- **Dates are refreshed from WFIGS on every run** (`recover.py`); `"dates_locked": true` in a
+  config keeps hand-set dates. Other per-fire downloads stay cached until `--cold`.
+- **Test switches** force fallbacks end to end: `DFH_DEM_SOURCE=service`,
+  `DFH_DNBR_SENSOR=sentinel2|landsat`, `DFH_DNBR_METHOD=single|composite`.
+- More traps (DEM projection, nodata labels, WFIGS geometry, Windows GDAL hangs, Soil Data
+  Access quirks): `design.md` §9.
 
 ## Project conventions
 
