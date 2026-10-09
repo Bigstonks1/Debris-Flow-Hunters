@@ -30,7 +30,7 @@ from shapely.ops import transform as shapely_transform, unary_union
 ROOT = Path(__file__).resolve().parent.parent
 import sys  # noqa: E402
 sys.path.insert(0, str(ROOT / "pipeline"))
-from fires import fire_key, unique_id_of  # noqa: E402
+from fires import PROJECT_SUFFIXES, fire_key, unique_id_of  # noqa: E402
 HERE = Path(__file__).resolve().parent
 OUT = HERE / "dist" / "debris_flow_map.html"
 OVERLAY_RES = 30          # metres per pixel for hillshade and severity overlays
@@ -53,7 +53,7 @@ def discover():
     for cfg in sorted((ROOT / "fires").glob("*.json")):
         fire = json.loads(cfg.read_text())
         key = fire_key(fire)
-        options = [fire["map_project"]] if "map_project" in fire else             [f"data/{key}_usgs_usgs", f"data/{key}_s2_auto_estimate"]
+        options = [fire["map_project"]] if "map_project" in fire else             [f"data/{key}{s}" for s in PROJECT_SUFFIXES]
         project = next((p for p in options if (ROOT / p / "exports" / "segments.shp").exists()), None)
         if not project:
             print(f"skip {cfg.name}: no finished project at {' or '.join(options)}")
@@ -70,19 +70,89 @@ def discover():
             severity = "estimated from dNBR"
         check = ROOT / project / "usgs_check.json"      # pipeline/usgs_check.py
         check = json.loads(check.read_text()) if check.exists() else None
+        services = input_services(sources, fire, check)
         found.append({
             "key": key.replace(" ", "_"), "name": fire.get("map_name", fire["name"]),
             "year": fire["year"], "state": STATES.get(fire["state"], fire["state"]),
             "state_code": fire["state"], "unique_id": unique_id_of(fire),
             "project": project, "inputs": inputs, "severity_source": severity,
             "usgs_median": fire.get("usgs_reference", {}).get("guidance_I15_50"),
-            "usgs_check": check,
+            "usgs_check": check, "services": services,
             "order": fire.get("map_order", 100),
             # app bookkeeping: its config, the key its data folders use, and whether it is
             # kept (protected from deletion; fires added in the app start not kept)
             "config": cfg.name, "data_key": key, "kept": fire.get("kept", True),
         })
     return sorted(found, key=lambda f: (f["order"], -f["year"], f["name"]))
+
+
+# The services the pipeline reads each input from (pipeline/fires.py, recover.py,
+# prepare_fire.py, sentinel2_dnbr.py, usgs_inputs.py, usgs_check.py; STATSGO via pfdf).
+SERVICES = {
+    "wfigs": ("WFIGS Interagency Perimeters (ArcGIS feature service)",
+              "https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Interagency_Perimeters/FeatureServer"),
+    "tnm": ("USGS 3DEP 1/3 arc-second tiles (The National Map, S3)",
+            "https://prd-tnm.s3.amazonaws.com/index.html?prefix=StagedProducts/Elevation/13/TIFF/"),
+    "dem_service": ("USGS 3DEP elevation image service (fallback when TNM S3 is down)",
+                    "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer"),
+    "statsgo": ("USGS STATSGO soil KF (ScienceBase, via pfdf)",
+                "https://www.sciencebase.gov/catalog/item/675083c6d34ea60e894354ad"),
+    "landfire": ("LANDFIRE EVT image service", "https://lfps.usgs.gov/arcgis/rest/services"),
+    "recover": ("RECOVER archive (Idaho State University GIS TReC)",
+                "https://giscenter-sl.isu.edu/aoc/aoc_research/recover2/archive/"),
+    "stac": ("Sentinel-2 L2A, Earth Search STAC (Element 84, AWS)",
+             "https://earth-search.aws.element84.com/v1/collections/sentinel-2-c1-l2a"),
+    "sciencebase": ("USGS ScienceBase (published assessment inputs)", "https://www.sciencebase.gov/catalog"),
+    "baer_sbs": ("Forest Service BAER soil burn severity (image service)",
+                 "https://imagery.geoplatform.gov/iipp/rest/services/Fire_Aviation/"
+                 "USFS_EDW_BAER_SoilBurnSeverityClassification/ImageServer"),
+    "sda": ("USDA SSURGO, Soil Data Access", "https://sdmdataaccess.sc.egov.usda.gov"),
+    "landsat": ("Landsat 8/9 L2, Microsoft Planetary Computer",
+                "https://planetarycomputer.microsoft.com/dataset/landsat-c2-l2"),
+}
+
+
+def input_services(sources, fire, check):
+    """One row per input: the layer, what it is (sources.json), and the service it came from."""
+    usgs_item = (fire.get("usgs_inputs") or {}).get("item")
+
+    def service(layer, label):
+        if layer == "perimeter":
+            return SERVICES["wfigs"]
+        if layer == "dem":
+            if "3DEP image service" in label:
+                return SERVICES["dem_service"]
+            return SERVICES["recover"] if "RECOVER" in label or "LiDAR" in label else SERVICES["tnm"]
+        if layer == "kf":
+            return SERVICES["statsgo"]
+        if layer == "evt":
+            return SERVICES["recover"] if "RECOVER" in label else SERVICES["landfire"]
+        if "Forest Service BAER map" in label:
+            return SERVICES["baer_sbs"]
+        if "published with USGS" in label:
+            return (SERVICES["sciencebase"][0], usgs_item or SERVICES["sciencebase"][1])
+        if layer == "dnbr" and "Landsat" in label:
+            return SERVICES["landsat"]
+        if layer == "dnbr" and "Sentinel-2" in label:
+            return SERVICES["stac"]
+        if layer == "severity" and "estimated" in label:
+            return ("Computed here from dNBR (125 / 250 / 500)", None)
+        return (None, None)
+
+    names = {"perimeter": "Fire perimeter", "dem": "Elevation", "kf": "Soil erodibility (KF)",
+             "evt": "Vegetation type (water, developed land)", "dnbr": "Burn imagery (dNBR)",
+             "severity": "Burn severity"}
+    rows = []
+    for layer, label in sources.items():
+        name, url = service(layer, label)
+        rows.append({"layer": names.get(layer, layer), "source": label, "service": name, "url": url})
+        if layer == "kf" and "SSURGO" in label:      # gaps filled from SSURGO (prepare_fire.fill_kf)
+            rows.append({"layer": "Soil erodibility gaps", "source": "SSURGO, rescaled to STATSGO",
+                         "service": SERVICES["sda"][0], "url": SERVICES["sda"][1]})
+    if check and check.get("found"):
+        rows.append({"layer": "USGS assessment (comparison)", "source": check.get("code"),
+                     "service": "USGS ScienceBase (published assessment)", "url": check.get("source")})
+    return rows
 
 
 def rnd(v, n=2):
@@ -189,7 +259,7 @@ def median(values):
     return round(float(np.median(v)), 1) if v else None
 
 
-SUMMARY = ("key", "name", "year", "state", "unique_id", "usgs_median", "usgs_check", "inputs",
+SUMMARY = ("key", "name", "year", "state", "unique_id", "usgs_median", "usgs_check", "inputs", "services",
            "severity_source", "stats", "kept")   # enough to list a fire; the rest is its map layers
 
 
@@ -203,7 +273,7 @@ def fire_payload(f):
     m1 = [p[idx["I15_50"]] for p in seg["props"]]
     return {
         **{k: f[k] for k in ("key", "name", "year", "state", "unique_id", "usgs_median",
-                             "usgs_check", "inputs", "severity_source")},
+                             "usgs_check", "inputs", "services", "severity_source")},
         "segments": seg, "perimeter": per,
         "hillshade": {"uri": hs_uri, "bounds": hs_bounds},
         "severity": {"uri": sev_uri, "bounds": sev_bounds},

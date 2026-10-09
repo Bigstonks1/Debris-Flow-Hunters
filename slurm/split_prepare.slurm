@@ -33,7 +33,7 @@ SEVERITY="${SEVERITY:-$DNBR}"   # baer | usgs | estimate
 PIECE_MEM="${PIECE_MEM:-64G}"   # Wapiti 1 m: largest piece 333 M cells, 40 GB peak
 PIECE_PARTITION="${PIECE_PARTITION:-short}"
 PIECE_TIME="${PIECE_TIME:-12:00:00}"
-cd "$HOME/scratch/Debris-Flow-Hunters"
+cd "${SLURM_SUBMIT_DIR:-$HOME/scratch/Debris-Flow-Hunters}"   # the repository the job was submitted from
 source .venv/bin/activate
 export DFH_STAGE_TIMEOUT=$((11 * 3600))
 

@@ -49,7 +49,7 @@ from shapely.ops import transform, unary_union
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "pipeline"))
-from fires import fire_key  # noqa: E402
+from fires import finished_project, fire_key  # noqa: E402
 
 SERVICE = ("https://services.arcgis.com/v01gqwM5QqNysAAi/arcgis/rest/services/"
            "USGS_Post_Fire_Hazard_Assessment_Data/FeatureServer")
@@ -221,7 +221,7 @@ def main():
     config = Path(sys.argv[1])
     fire = json.loads(config.read_text())
     project = Path(sys.argv[2]) if len(sys.argv) > 2 else \
-        ROOT / "data" / f"{fire_key(fire)}_s2_auto_estimate"
+        (finished_project(fire_key(fire)) or ROOT / "data" / f"{fire_key(fire)}_s2_auto_estimate")
     result = {"checked": date.today().isoformat()}
     try:
         ref, stats, tried = fire.get("usgs_reference"), None, []

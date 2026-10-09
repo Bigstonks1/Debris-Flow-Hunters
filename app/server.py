@@ -39,8 +39,13 @@ from shapely.geometry import MultiLineString, MultiPoint, MultiPolygon, mapping,
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "map"))
 sys.path.insert(0, str(ROOT / "pipeline"))
+sys.path.insert(0, str(ROOT / "app"))
+import batches  # noqa: E402
 import build_map  # noqa: E402
+import hpc  # noqa: E402
 from fires import UID_RE, describe, find_config, fire_key, lookup  # noqa: E402
+
+BATCH_RE = re.compile(r"^app_\d{8}-\d{6}$")
 
 RUNS = ROOT / "data" / "runs"
 EXPORTS = ROOT / "data" / "exports"
@@ -48,10 +53,11 @@ PORT = 8000
 STAGES = {   # run_fire.py stage banners -> what the user sees
     "recover": "Fire perimeter (WFIGS) and RECOVER data",
     "sentinel2": "Burn severity from Sentinel-2 (dNBR)",
-    "prepare": "Elevation (USGS 10 m) and soils (STATSGO)",
+    "prepare": "Elevation (USGS 10 m) and soils (STATSGO, SSURGO)",
     "wildcat": "wildcat: stream network", "preprocess": "wildcat: preparing inputs",
     "assess": "wildcat: likelihood, volume and hazard", "export": "wildcat: writing results",
     "usgs_inputs": "Looking for USGS's published BAER inputs",
+    "baer_sbs": "Looking for a Forest Service BAER burn severity map",
     "usgs": "Checking against USGS's own assessment",
 }
 NAME_RE = re.compile(r"^[A-Za-z0-9 .'\-]{2,60}$")
@@ -67,7 +73,7 @@ def fires():
     return {f["key"]: f for f in build_map.discover()}
 
 
-META = ("key", "name", "year", "state", "unique_id", "usgs_median", "usgs_check", "inputs",
+META = ("key", "name", "year", "state", "unique_id", "usgs_median", "usgs_check", "inputs", "services",
         "severity_source", "kept")
 
 
@@ -312,6 +318,8 @@ def start_run(card):
     uid, name, year, state = card["unique_id"], card["name"], card["year"], card["state"]
     with run_lock:
         active = [r for r in runs.values() if r["status"] in ("queued", "running")]
+        if isinstance(RUNNER, LocalRunner) and batches.active("local"):
+            raise RuntimeError("a batch is running on this computer; wait for it to finish")
         if len(active) >= RUNNER.max_runs:
             raise RuntimeError("a run is already in progress; one at a time"
                                if RUNNER.max_runs == 1 else
@@ -540,6 +548,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, body, kind, filename=name)
             if parts == ["api", "trash"]:
                 return self.send(200, trash_list())
+            if parts == ["api", "batches"]:
+                return self.send(200, batches.listing())
+            if parts[:2] == ["api", "batches"] and len(parts) == 3 and BATCH_RE.match(parts[2]):
+                v = batches.view(parts[2])
+                return self.send(200, v) if v else self.send(404, {"error": "no such batch"})
+            if parts == ["api", "settings", "hpc"]:
+                return self.send(200, hpc.public())
             if parts[:2] == ["api", "runs"] and len(parts) == 3 and parts[2] in runs:
                 return self.send(200, run_status(parts[2]))
             if parts == ["favicon.ico"]:
@@ -553,6 +568,8 @@ class Handler(BaseHTTPRequestHandler):
         parts = [p for p in urlparse(self.path).path.split("/") if p]
         if parts[:2] in (["api", "fires"], ["api", "trash"]) and len(parts) == 4:
             return self.manage(parts)
+        if parts[:2] in (["api", "batches"], ["api", "settings"]):
+            return self.batch_or_settings(parts)
         if parts != ["api", "runs"]:
             return self.send(404, {"error": "not found"})
         try:
@@ -611,8 +628,60 @@ class Handler(BaseHTTPRequestHandler):
             traceback.print_exc()
             return self.send(500, {"error": str(e)})
 
+    def batch_or_settings(self, parts):
+        """POST /api/batches {lines, where: local|hpc}, /api/batches/<name>/reconnect,
+        /api/settings/hpc {profile fields}, /api/settings/hpc/password {password | clear, which},
+        /api/settings/hpc/test"""
+        try:
+            n = int(self.headers.get("Content-Length", 0))
+            if n > 200_000:
+                return self.send(413, {"error": "request too large"})
+            body = json.loads(self.rfile.read(n) or b"{}")
+            if parts == ["api", "batches"]:
+                lines = body.get("lines") or []
+                if not isinstance(lines, list) or not all(isinstance(l, str) and len(l) < 200 for l in lines):
+                    return self.send(400, {"error": "lines: a list of fire IDs or name,year[,state]"})
+                where = body.get("where", "local")
+                if where == "local":
+                    with run_lock:
+                        if isinstance(RUNNER, LocalRunner) and any(
+                                r["status"] in ("queued", "running") for r in runs.values()):
+                            return self.send(409, {"error": "a single-fire run is in progress on this "
+                                                            "computer; wait for it to finish"})
+                rec = batches.start(lines, where, int(body.get("workers", 3)))
+                return self.send(202, batches.view(rec["name"]))
+            if parts[:2] == ["api", "batches"] and len(parts) == 4 and parts[3] == "reconnect" \
+                    and BATCH_RE.match(parts[2]):
+                batches.reconnect(parts[2])
+                return self.send(200, batches.view(parts[2]))
+            if parts == ["api", "settings", "hpc"]:
+                return self.send(200, hpc.public(hpc.save(body)))
+            if parts == ["api", "settings", "hpc", "password"]:
+                s = hpc.load()
+                if not s["host"] or not s["user"]:
+                    return self.send(400, {"error": "save the host and user first"})
+                which = "jump" if body.get("which") == "jump" else "main"
+                if body.get("clear"):
+                    hpc.clear_password(s, which)
+                else:
+                    pw = body.get("password")
+                    if not isinstance(pw, str) or not pw or len(pw) > 512:
+                        return self.send(400, {"error": "enter the password"})
+                    hpc.set_password(s, pw, which)
+                return self.send(200, hpc.public(s))
+            if parts == ["api", "settings", "hpc", "test"]:
+                return self.send(200, {"checks": hpc.test()})
+            return self.send(404, {"error": "not found"})
+        except ValueError as e:
+            return self.send(400, {"error": str(e)})
+        except RuntimeError as e:
+            return self.send(409, {"error": str(e)})
+        except Exception as e:
+            traceback.print_exc()
+            return self.send(500, {"error": str(e)})
+
     def log_message(self, fmt, *args):      # keep the console to runs and errors
-        if "/api/runs/" not in self.path:
+        if "/api/runs/" not in self.path and not (self.command == "GET" and "/api/batches" in self.path):
             sys.stderr.write(f"{self.command} {self.path} -> {args[1] if len(args) > 1 else ''}\n")
 
 
@@ -629,6 +698,7 @@ if __name__ == "__main__":
     if args.runner == "slurm":
         # non-POSIX splitting keeps Windows backslashes but also the quotes; drop those
         RUNNER = SlurmRunner([t.strip('"') for t in shlex.split(args.slurm_prefix, posix=False)])
+    batches.resume()        # keep following HPC batches started before a restart
     print(f"Debris-flow hazard app: http://127.0.0.1:{args.port}  runner: {args.runner}"
           f"{f' via {args.slurm_prefix}' if args.slurm_prefix else ''}  (Ctrl+C to stop)")
     ThreadingHTTPServer(("127.0.0.1", args.port), Handler).serve_forever()

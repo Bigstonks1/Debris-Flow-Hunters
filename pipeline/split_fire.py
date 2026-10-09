@@ -22,8 +22,10 @@ How: the whole fire is preprocessed once as usual (cheap: 9.5 GB at Grizzly 1 m)
              plus MARGIN_M, the excluded mask, the parent's configuration
     run      wildcat assess + export in each piece (locally here; a Slurm array on Lemhi,
              where `run --piece N --build` builds piece N inside its own task)
-    merge    a segment belongs to the piece containing its midpoint; basins and outlets
-             follow their segment; IDs renumbered; one project, <project>_split
+    merge    a segment belongs to the piece containing its midpoint; basins follow their
+             segment (Segment_ID); an outlet is kept when it lies exactly at the downstream
+             end of a kept basin's segment (outlets files are not in basin order); IDs
+             renumbered; one project, <project>_split
     compare  the merged result against the whole-fire run of the same project
 
     python pipeline/split_fire.py all data/wapiti_baer_baer [--target-km2 60]
@@ -315,8 +317,11 @@ def run(project):
         build_s = round(time.perf_counter() - t0, 1)
     pieces = [p for p in pieces_of(project) if only < 0 or p.name.endswith(f"_{only:02d}")]
     t0 = time.perf_counter()
+    # First piece alone when running several at once: it builds numba's compiled-code cache,
+    # which processes building it at the same time corrupt (see batch.py, run_local)
+    results = [run_piece(pieces[0])] if workers > 1 and pieces else []
     with ThreadPoolExecutor(max_workers=workers) as pool:   # each piece is its own process
-        results = list(pool.map(run_piece, pieces))
+        results += list(pool.map(run_piece, pieces[len(results):]))
     if build_s is not None:
         results[0]["build"] = {"seconds": build_s}
     elapsed = round(time.perf_counter() - t0, 1)
@@ -349,6 +354,12 @@ def preprocess(project):
 
 # ---------------------------------------------------------------- merge
 
+def point_key(xy):
+    """A point's coordinates rounded to ~1 mm (WGS 84 degrees), for exact-location matching:
+    wildcat writes an outlet at the same coordinates as its segment's last vertex."""
+    return round(xy[0], 8), round(xy[1], 8)
+
+
 def merge(project):
     project = Path(project)
     out = split_dir(project)
@@ -370,7 +381,7 @@ def merge(project):
         r, c = rasterio.transform.rowcol(ltransform, x, y)
         return int(label[r, c]) if 0 <= r < label.shape[0] and 0 <= c < label.shape[1] else -1
 
-    new_id, segs, keep = {}, [], {}
+    new_id, segs, keep, seg_end = {}, [], {}, {}
     for piece in pieces_of(project):
         i = int(piece.name.split("_")[1])
         if not (piece / "exports" / "segments.shp").exists():     # an empty piece
@@ -381,6 +392,9 @@ def merge(project):
                 g = shape(f["geometry"])
                 if owner(g, crs) == i:
                     props = dict(f["properties"])
+                    # a basin's outlet is the downstream end of its terminal segment
+                    last = list(getattr(g, "geoms", [g]))[-1].coords[-1]
+                    seg_end[(i, props["Segment_ID"])] = point_key(last)
                     new_id[(i, props["Segment_ID"])] = len(new_id) + 1
                     props["Segment_ID"] = new_id[(i, props["Segment_ID"])]
                     segs.append((mapping(g), props))
@@ -391,7 +405,10 @@ def merge(project):
         for g, p in segs:
             d.write({"geometry": g, "properties": p})
     counts = {"segments": len(segs)}
-    kept_basins = {}   # piece -> indices of the basins kept; outlet j belongs to basin j
+    # Outlets are matched to kept basins by location, never by position in the file: wildcat
+    # saves basins, removes nested drainages, then saves outlets, so outlet j is not basin j.
+    # A piece's outlet is kept when it is exactly the downstream end of a kept basin's segment.
+    kept_outlets = {}   # piece -> keys of the outlet points of its kept basins
     for layer in ("basins", "outlets"):
         rows, schema_l = [], None
         for piece in pieces_of(project):
@@ -401,15 +418,15 @@ def merge(project):
                 continue
             with fiona.open(src) as c:
                 schema_l, crs_l = c.schema, c.crs
-                for j, f in enumerate(c):
+                for f in c:
                     props = dict(f["properties"])
                     if layer == "basins":      # follow their segment
                         key = (i, props["Segment_ID"])
                         if key in new_id:
+                            kept_outlets.setdefault(i, set()).add(seg_end[key])
                             props["Segment_ID"] = new_id[key]
                             rows.append((f["geometry"], props))
-                            kept_basins.setdefault(i, set()).add(j)
-                    elif j in kept_basins.get(i, ()):   # outlets: paired with basins
+                    elif point_key(f["geometry"]["coordinates"]) in kept_outlets.get(i, ()):
                         props = {k: (len(rows) if k == "FID" else v) for k, v in props.items()}
                         rows.append((f["geometry"], props))
         if schema_l:
@@ -439,6 +456,32 @@ def merge(project):
 
 # ---------------------------------------------------------------- compare
 
+def outlet_check(project, merged):
+    """Outlets by position, not count: in the merged result every outlet must be the mouth
+    (downstream end of the terminal segment) of a merged basin, and the outlets should be at
+    the same places as the whole run's."""
+    def points(p):
+        path = p / "exports" / "outlets.shp"
+        if not path.exists():
+            return set()
+        with fiona.open(path) as c:
+            return {point_key(f["geometry"]["coordinates"]) for f in c}
+
+    def mouths(p):
+        with fiona.open(p / "exports" / "segments.shp") as c:
+            end = {f["properties"]["Segment_ID"]:
+                   point_key(list(getattr(shape(f["geometry"]), "geoms", [shape(f["geometry"])]))[-1].coords[-1])
+                   for f in c}
+        with fiona.open(p / "exports" / "basins.shp") as c:
+            return {end[f["properties"]["Segment_ID"]] for f in c}
+
+    whole, split, split_mouths = points(project), points(merged), mouths(merged)
+    return {"outlets_whole": len(whole), "outlets_split": len(split),
+            "outlets_same_place": len(whole & split),
+            "split_outlets_not_at_a_basin_mouth": len(split - split_mouths),
+            "split_basins_without_outlet": len(split_mouths - split)}
+
+
 def compare(project):
     project = Path(project)
     merged = project.parent / f"{project.name}_split"
@@ -456,6 +499,7 @@ def compare(project):
     report = {"segments_whole": len(whole), "segments_split": len(split), "identical_geometry": len(both),
               "only_whole": len(whole.keys() - split.keys()), "only_split": len(split.keys() - whole.keys()),
               "basins_whole": len(load(project, "basins")), "basins_split": len(load(merged, "basins"))}
+    report.update(outlet_check(project, merged))
     for field in ("I15_50", "P_24mmh", "V_24mmh", "Area_km2", "Terrain_M1", "Fire_M1", "Soil_M1"):
         pairs = [(whole[k][field], split[k][field]) for k in both
                  if whole[k][field] is not None and split[k][field] is not None]

@@ -17,7 +17,7 @@
 set -euo pipefail
 : "${PROJECT:?set PROJECT}"
 : "${CONFIG:?set CONFIG, the fire's fires/*.json}"
-cd "$HOME/scratch/Debris-Flow-Hunters"
+cd "${SLURM_SUBMIT_DIR:-$HOME/scratch/Debris-Flow-Hunters}"   # the repository the job was submitted from
 source .venv/bin/activate
 echo "merge ${PROJECT} on $(hostname), $(date)"
 python pipeline/split_fire.py merge "$PROJECT"

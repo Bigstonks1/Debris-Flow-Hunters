@@ -2,19 +2,28 @@
 
 Inputs, all in the fire's UTM CRS:
   perimeter  WFIGS final perimeter (pipeline/recover.py)
-  dem        USGS 1/3 arc-second DEM, 10 m, read straight from the TNM S3 tiles.
-             pfdf's TNM fetcher returns nothing for Idaho (design.md, "Things that will
-             bite you"). The RECOVER bundle's DEM is usable but is a different product
+  dem        USGS 1/3 arc-second DEM, 10 m, read straight from the TNM S3 tiles by name
+             (current, or a pinned version with --dem-version). pfdf's TNM fetcher depends
+             on TNM's search index, which listed no Idaho tiles until ~2026-09-24, and cannot
+             fetch older versions; it is used here only to cross-check the tile list
+             (design.md, "Things that will bite you"). Tiles that do not exist (ocean,
+             outside the US) are skipped; empty pixels stop the run only inside the
+             perimeter. The RECOVER bundle's DEM is usable but is a different product
              stored as whole metres; at Wapiti it differs from TNM by a median 3.4 m, with
              the share of the fire >= 23 deg within 1%. We use TNM because USGS did.
   evt        LANDFIRE EVT from the RECOVER bundle (masks water and developed land);
              or, with no bundle, from LANDFIRE directly (landfire_evt)
-  kf         STATSGO KFFACT via pfdf, as for Grizzly
+  kf         STATSGO KFFACT via pfdf, as USGS uses; its gaps in the buffered perimeter
+             filled from SSURGO (USDA Soil Data Access, pipeline/soils.py), then with the
+             fire's median (fill_kf). --kf-fill none leaves them empty, as USGS does;
+             --kf-fill median skips SSURGO.
   dnbr       --dnbr usgs            BAER dNBR USGS published with its assessment
                                     (fires/*.json "usgs_inputs", pipeline/usgs_inputs.py)
              --dnbr baer            BAER package (manual download)
              --dnbr s2:<tag>        pipeline/sentinel2_dnbr.py output data/s2_dnbr/<fire>/<tag>
   severity   --severity usgs        BAER soil burn severity USGS published (as above)
+             --severity baersbs     the Forest Service BAER map (fires/*.json "baer_sbs",
+                                    pipeline/baer_sbs.py)
              --severity baer        BAER soil burn severity from the same package
              --severity estimate    none supplied; wildcat estimates from the dNBR
   --evt landfire  LANDFIRE EVT even when a RECOVER bundle exists (to compare the two)
@@ -32,10 +41,15 @@ Inputs, all in the fire's UTM CRS:
 import glob
 import json
 import math
+import re
 import shutil
 import subprocess
 import sys
 import time
+import os
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 import fiona
@@ -48,14 +62,15 @@ from pyproj import Transformer
 from rasterio.enums import Resampling
 from rasterio.transform import from_origin
 from rasterio.vrt import WarpedVRT
-from rasterio.features import geometry_mask
+from rasterio.features import geometry_mask, shapes
 from rasterio.windows import Window, from_bounds
 from shapely.geometry import mapping, shape
-from shapely.ops import transform as shapely_transform
+from shapely.ops import transform as shapely_transform, unary_union
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "pipeline"))
 from fires import fire_key  # noqa: E402
+import soils  # noqa: E402
 # wildcat's default configuration.py (as `wildcat initialize` writes it); each project
 # gets a copy with the fire-specific changes below
 TEMPLATE_CONFIG = ROOT / "pipeline" / "wildcat_config_template.py"
@@ -70,6 +85,7 @@ PAD_M = 5000  # wildcat buffers the perimeter by 3 km
 BUFFER_M = 3000  # wildcat's buffer_km in the template configuration
 GAP_LIMIT = 0.001  # largest share of the used LiDAR area that may be filled
 FILL = -32768
+MIN_OVERLAP_PX = 10_000  # pixels with both STATSGO and SSURGO KF needed to rescale SSURGO (1 km2)
 
 
 def tnm_tiles(lon_min, lat_min, lon_max, lat_max):
@@ -77,6 +93,99 @@ def tnm_tiles(lon_min, lat_min, lon_max, lat_max):
     return [f"n{lat:02d}w{lon:03d}"
             for lat in range(math.floor(lat_min) + 1, math.floor(lat_max) + 2)
             for lon in range(math.ceil(-lon_max), math.ceil(-lon_min) + 1)]
+
+
+def tile_exists(source):
+    """Whether a DEM tile exists: a local file, or an S3 object (HEAD). A missing tile is
+    normal over the ocean and outside the US; any other failure is raised, not skipped."""
+    if not source.startswith("/vsicurl/"):
+        return Path(source).exists()
+    request = urllib.request.Request(source[len("/vsicurl/"):], method="HEAD")
+    try:
+        urllib.request.urlopen(request, timeout=60).close()
+        return True
+    except urllib.error.HTTPError as e:
+        if e.code in (403, 404):          # S3 answers 403 for a missing public object
+            return False
+        raise
+
+
+DEM_SERVICE = "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer"
+SERVICE_BLOCK = 2000       # export blocks; 4000 x 4000 drew HTTP 500s (limit is 8000)
+
+
+def service_get(url, tries=5):
+    """The 3DEP service answers the odd 500/502/503: retry with backoff."""
+    for i in range(tries):
+        try:
+            return urllib.request.urlopen(url, timeout=600)
+        except urllib.error.HTTPError as e:
+            if e.code < 500 or i == tries - 1:
+                raise
+            time.sleep(10 * (i + 1))
+
+
+def dem_from_service(tiles, crs, transform, width, height):
+    """The same 1/3 arc-second tiles from USGS's 3DEP image service, for when TNM's S3 is
+    unreachable. The service mosaics every 3DEP resolution (1 m LiDAR included), so the
+    export is locked to its 1/3 arc-second catalog items (cell ~10.3 m), named as the TNM
+    tiles; their pubdate is the tile version, recorded so a run says what it used. The
+    service resamples to our UTM grid with bilinear interpolation, as warp_mosaic does.
+    Current versions only: the service keeps no older ones. Returns (dem, {tile: version})."""
+    epsg = int(str(crs).split(":")[1])
+    to_wgs = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+    left, top = transform.c, transform.f
+    w, s, e, n = to_wgs.transform_bounds(left, top - height * RES, left + width * RES, top,
+                                         densify_pts=21)
+    with service_get(f"{DEM_SERVICE}/query?" + urllib.parse.urlencode({
+            "where": "Category = 1 AND LowPS > 10 AND LowPS < 11", "geometry": f"{w},{s},{e},{n}",
+            "geometryType": "esriGeometryEnvelope", "inSR": 4326,
+            "spatialRel": "esriSpatialRelIntersects", "outFields": "OBJECTID,Name,pubdate",
+            "returnGeometry": "false", "f": "json"})) as r:
+        items = [f["attributes"] for f in json.load(r)["features"]
+                 if f["attributes"]["Name"] in tiles]
+    if not items:
+        raise SystemExit(f"3DEP image service has none of the tiles {tiles}")
+    versions = {i["Name"]: str(i["pubdate"]) for i in items}
+    rule = json.dumps({"mosaicMethod": "esriMosaicLockRaster",
+                       "lockRasterIds": [i["OBJECTID"] for i in items]})
+    dem = np.full((height, width), np.nan, dtype="float64")
+    for row in range(0, height, SERVICE_BLOCK):
+        for col in range(0, width, SERVICE_BLOCK):
+            h, w_ = min(SERVICE_BLOCK, height - row), min(SERVICE_BLOCK, width - col)
+            x0, y1 = left + col * RES, top - row * RES
+            params = {"bbox": f"{x0},{y1 - h * RES},{x0 + w_ * RES},{y1}", "bboxSR": epsg,
+                      "imageSR": epsg, "size": f"{w_},{h}", "format": "tiff", "pixelType": "F32",
+                      "noData": -9999, "interpolation": "RSP_BilinearInterpolation",
+                      "mosaicRule": rule, "f": "image"}
+            with service_get(f"{DEM_SERVICE}/exportImage?" + urllib.parse.urlencode(params)) as r:
+                data = r.read()
+            if not data.startswith((b"II*\x00", b"MM\x00*")):
+                raise SystemExit(f"3DEP image service export failed: {data[:200]!r}")
+            with rasterio.MemoryFile(data) as mem, mem.open() as src:
+                block = src.read(1).astype("float64")
+                if src.nodata is not None:
+                    block[block == src.nodata] = np.nan
+            block[block <= -9999] = np.nan
+            dem[row:row + h, col:col + w_] = block
+    return dem, versions
+
+
+def pfdf_tile_check(tiles, wgs):
+    """Cross-check our tile list with pfdf's TNM search (current versions only). Advisory:
+    TNM's index has lagged the published tiles before (Idaho returned none until about
+    2026-09-24), so a difference is reported, never acted on."""
+    try:
+        from pfdf.data.usgs.tnm import dem as tnm_dem
+        listed = {m.group(0) for t in tnm_dem.tiles(wgs)
+                  if (m := re.search(r"n\d{2}w\d{3}", t["title"]))}
+    except Exception as e:      # the search API is down or changed: the S3 read goes on
+        print(f"dem       : pfdf/TNM tile search unavailable ({type(e).__name__}); not cross-checked")
+        return
+    ours = set(tiles)
+    if listed != ours:
+        print(f"dem       : tile lists differ; ours {sorted(ours)}, TNM search {sorted(listed)} "
+              f"(only in ours: {sorted(ours - listed)}; only in TNM: {sorted(listed - ours)})")
 
 
 def warp_mosaic(sources, crs, transform, width, height, resampling, dtype="float32"):
@@ -166,15 +275,55 @@ def fetch_cache(kind, fire, dem_version=None):
     _, transform, width, height = fire_grid(fire)
     target = cache_paths(fire, dem_version)[kind]
     if kind == "dem":
+        geom, _, _, _ = fire_grid(fire)
         box = BoundingBox(transform.c, transform.f - height * RES,
                           transform.c + width * RES, transform.f, crs=fire["crs"])
         wgs = box.reproject(4326)
         tiles = tnm_tiles(wgs.left, wgs.bottom, wgs.right, wgs.top)
-        dem = warp_mosaic(dem_sources(tiles, dem_version), crs, transform,
-                          width, height, Resampling.bilinear)
-        if np.isnan(dem).any():
-            raise SystemExit(f"DEM has {int(np.isnan(dem).sum())} empty pixels; tiles {tiles}")
+        record = {"source": "TNM S3", "version": dem_version or "current"}
+        try:
+            if os.environ.get("DFH_DEM_SOURCE") == "service":       # to test the fallback
+                raise OSError("DFH_DEM_SOURCE=service")
+            sources = dem_sources(tiles, dem_version)
+            present = [(t, s) for t, s in zip(tiles, sources) if tile_exists(s)]
+            if len(present) < len(tiles):
+                print(f"dem       : no tile {sorted(set(tiles) - {t for t, _ in present})} "
+                      f"(ocean or outside the US); using {[t for t, _ in present]}")
+            if not present:
+                raise SystemExit(f"no DEM tile exists for {tiles}")
+            if not dem_version:
+                pfdf_tile_check([t for t, _ in present], wgs)
+            dem = warp_mosaic([s for _, s in present], crs, transform, width, height,
+                              Resampling.bilinear)
+            record["tiles"] = [t for t, _ in present]
+        except (OSError, urllib.error.URLError, rasterio.errors.RasterioIOError) as e:
+            # TNM's S3 unreachable: the same tiles from USGS's 3DEP image service. Only for
+            # the current version; a pinned version exists nowhere else, so that stops.
+            if dem_version:
+                raise SystemExit(f"TNM S3 unreachable ({e}) and version {dem_version} is "
+                                 "only there") from None
+            print(f"dem       : TNM S3 unreachable ({e}); using USGS's 3DEP image service")
+            dem, versions = dem_from_service(tiles, crs, transform, width, height)
+            record = {"source": "3DEP image service", "version": "current",
+                      "tiles": versions, "service": DEM_SERVICE}
+            print(f"dem       : 3DEP image service, 1/3 arc-second tiles {versions}")
+        empty = np.isnan(dem)
+        if empty.any():
+            # No elevation (ocean, beyond the border) is left as nodata. Inside the perimeter
+            # (a WFIGS perimeter that crosses into Mexico or Canada) main() clips the
+            # perimeter to the DEM's coverage; with no elevation anywhere inside, stop.
+            inside = ~geometry_mask([mapping(geom)], dem.shape, transform)   # geom is in the fire's UTM CRS
+            if not (inside & ~empty).any():
+                raise SystemExit(f"DEM has no elevation anywhere inside the fire perimeter; "
+                                 f"tiles {record.get('tiles')}")
+            lost = int((empty & inside).sum())
+            print(f"dem       : {int(empty.sum())} pixels have no elevation (no land tile, or "
+                  f"outside the US); left as nodata"
+                  + (f"; {lost} of them inside the perimeter, which is clipped" if lost else ""))
+            dem[empty] = -9999.0
         write(target, dem, crs, transform, -9999.0, "float32")
+        # which source and tile versions this cache came from (read by main for sources.json)
+        Path(f"{target}.source.json").write_text(json.dumps(record, indent=1))
     else:
         box = BoundingBox(transform.c, transform.f - height * RES,
                           transform.c + width * RES, transform.f, crs=fire["crs"])
@@ -318,6 +467,62 @@ def lidar_dem(fire, res):
     return target
 
 
+def fill_kf(fire, statsgo_path, geom, crs, transform, width, height, mode, has_dem=None):
+    """KF on the fire grid: STATSGO, its gaps filled from SSURGO and then the fire's median.
+
+    A gap is a pixel STATSGO leaves empty or at 0 or below (its COG stores missing map units
+    as 0, sometimes -0.1); wildcat drops those (constrain_kf) and the streams draining them
+    get no M1 threshold. Only gaps where wildcat reads KF (the perimeter plus its 3 km
+    buffer) and has elevation (has_dem: across a border or over the ocean there is neither
+    US soil nor DEM, and wildcat models nothing there) are filled. mode: "ssurgo" (SSURGO, then median for what is left), "median"
+    (median only). USGS does not fill KF in its own assessments (Big Bear 2025: 16 segments
+    without a threshold, Wapiti 2024: 517), so the fill is recorded in sources.json and
+    `--kf-fill none` keeps STATSGO as is. Returns the array and a sources.json note."""
+    kf = warp_mosaic([statsgo_path], crs, transform, width, height, Resampling.nearest)
+    used = ~geometry_mask([mapping(geom.buffer(BUFFER_M + 250))], kf.shape, transform)
+    if has_dem is not None:
+        used &= has_dem
+    gaps = used & ~(kf > 0)
+    total = int(used.sum())
+    if not gaps.any():
+        print("kf        : STATSGO KFFACT, no gaps")
+        return kf, "STATSGO soils"
+    print(f"kf        : STATSGO KFFACT has no value for {100 * gaps.sum() / total:.1f}% of the "
+          f"buffered perimeter")
+    notes = []
+    if mode == "ssurgo":
+        cache = ROOT / "data" / "recover" / fire_key(fire) / f"kf_ssurgo_{fire['crs']}.tif"
+        try:
+            if cache.exists():
+                with rasterio.open(cache) as src:
+                    ssurgo = src.read(1)
+            else:
+                ssurgo, n_poly, n_units = soils.ssurgo_kf(crs, transform, kf.shape, gaps)
+                write(cache, ssurgo, crs, transform, np.nan, "float32")
+                print(f"            SSURGO: {n_poly} map-unit polygons, {n_units} map units with KF")
+            # The two surveys are on different scales: where both have KF, SSURGO's is lower
+            # (Wapiti: median ratio 0.74 over 8.8 M pixels). Raw SSURGO in the gaps would lower
+            # S there and raise thresholds, so it is rescaled to STATSGO's scale, the one M1
+            # was fit with, by this fire's own median ratio.
+            both = (kf > 0) & (ssurgo > 0)
+            scale = float(np.median(kf[both] / ssurgo[both])) if both.sum() >= MIN_OVERLAP_PX else 1.0
+            take = gaps & (ssurgo > 0)
+            kf[take] = ssurgo[take] * scale
+            gaps &= ~take
+            if take.any():
+                notes.append(f"SSURGO x{scale:.2f} {100 * take.sum() / total:.1f}%")
+            print(f"            filled {100 * take.sum() / total:.1f}% from SSURGO, rescaled x{scale:.3f} "
+                  f"to STATSGO ({int(both.sum())} pixels with both)")
+        except Exception as e:          # SDA down or refused: carry on with the median
+            print(f"            SSURGO unavailable ({e}); median only")
+    if gaps.any():
+        median = float(np.median(kf[used & (kf > 0)]))
+        kf[gaps] = median
+        notes.append(f"fire median {median:.2f} {100 * gaps.sum() / total:.1f}%")
+        print(f"            filled {100 * gaps.sum() / total:.1f}% with the fire's median KF {median:.3f}")
+    return kf, "STATSGO soils; gaps filled: " + ", ".join(notes) + " of the area used"
+
+
 def baer_file(fire, suffix):
     return Path(glob.glob(str(ROOT / fire["baer_dir"] / "baer_*" / f"*_{suffix}"))[0])
 
@@ -330,6 +535,9 @@ def main():
     dem_version = args[args.index("--dem-version") + 1] if "--dem-version" in args else None
     lidar_res = int(args[args.index("--lidar-res") + 1]) if "--lidar-res" in args else None
     evt_source = args[args.index("--evt") + 1] if "--evt" in args else "auto"
+    kf_mode = args[args.index("--kf-fill") + 1] if "--kf-fill" in args else "ssurgo"
+    if kf_mode not in ("ssurgo", "median", "none"):
+        raise SystemExit("--kf-fill ssurgo, median or none")
     key = fire_key(fire)
     recover = ROOT / "data" / "recover" / key
     crs = f"EPSG:{fire['crs']}"
@@ -371,8 +579,11 @@ def main():
         with rasterio.open(dem_cache) as src:
             assert src.transform == transform and src.shape == (height, width)
             stats = src.read(1)
+            stats = stats[stats != src.nodata]
         shutil.copy(dem_cache, inputs / "dem.tif")
-        print(f"dem       : TNM 1/3 arc-second, version {dem_version or 'current'}, "
+        origin = Path(f"{dem_cache}.source.json")
+        origin = json.loads(origin.read_text())["source"] if origin.exists() else "TNM S3"
+        print(f"dem       : 1/3 arc-second from {origin}, version {dem_version or 'current'}, "
               f"{width} x {height} at {RES} m, "
               f"{stats.min():.0f}-{stats.max():.0f} m")
 
@@ -383,6 +594,33 @@ def main():
     sources = {"perimeter": "WFIGS final perimeter",
                "dem": f"RECOVER 1 m LiDAR averaged to {lidar_res} m" if lidar_res
                else "USGS 10 m DEM", "kf": "STATSGO soils"}
+    # A WFIGS perimeter that crosses into Mexico or Canada (Border 6 2026) has no US elevation
+    # on the far side: clip the perimeter to where the DEM has data, so wildcat models the
+    # US part, and record what was removed. A perimeter fully covered is left untouched.
+    has_dem = None
+    if not lidar_res:
+        with rasterio.open(dem_cache) as src:
+            has_dem = src.read(1) != src.nodata
+        inside = ~geometry_mask([mapping(geom)], has_dem.shape, transform)
+        if (inside & ~has_dem).any():
+            covered = unary_union([shape(s) for s, v in shapes(
+                has_dem.astype("uint8"), mask=has_dem, transform=transform) if v == 1])
+            clipped = geom.intersection(covered)
+            removed = (geom.area - clipped.area) / 1e6
+            geom = clipped
+            with fiona.open(inputs / "perimeter.shp", "w", driver="ESRI Shapefile", crs=crs,
+                            schema={"geometry": "MultiPolygon" if geom.geom_type == "MultiPolygon"
+                                    else "Polygon", "properties": {"name": "str:40"}}) as out:
+                out.write({"geometry": mapping(geom), "properties": {"name": fire["name"]}})
+            sources["perimeter"] = (f"WFIGS final perimeter, clipped to US elevation coverage: "
+                                    f"{removed:.1f} of {removed + geom.area / 1e6:.1f} km2 removed")
+            print(f"perimeter : clipped to the DEM's coverage, {removed:.1f} km2 removed "
+                  f"(outside the US); {geom.area / 1e6:.1f} km2 modeled")
+    record = Path(f"{dem_cache}.source.json") if not lidar_res else None
+    if record and record.exists() and json.loads(record.read_text())["source"] != "TNM S3":
+        r = json.loads(record.read_text())
+        sources["dem"] = ("USGS 10 m DEM (3DEP image service, tiles "
+                          + ", ".join(f"{t} {v}" for t, v in r["tiles"].items()) + ")")
     evt_path = recover / "EVT_ExistingVegetationType.tif"
     if evt_path.exists() and evt_source != "landfire":
         evt = warp_mosaic([evt_path], crs, transform, width, height, Resampling.nearest)
@@ -395,14 +633,22 @@ def main():
             write(inputs / "evt.tif", np.nan_to_num(evt, nan=FILL), crs, transform, FILL, "int16")
             sources["evt"] = f"LANDFIRE LF{year} EVT"
             masked = np.isin(evt, [7292, 7296, 7297, 7298, 7299, 7300]).mean()
-            print(f"evt       : LANDFIRE LF{year} EVT ({'forced' if evt_source == 'landfire' else 'no RECOVER bundle'}); "
+            print(f"evt       : LANDFIRE LF{year} EVT ({'forced' if evt_source == 'landfire' else 'no RECOVER EVT'}); "
                   f"{100 * masked:.2f}% water or developed")
         except (OSError, SystemExit) as e:     # network or service failure: run unmasked
             config = config.replace('evt = r"evt"', "evt = None")
             print(f"evt       : none ({e}); water and developed land not masked")
 
-    shutil.copy(ensure_cache("kf", fire, args[0]), inputs / "kf.tif")
-    print(f"kf        : STATSGO KFFACT")
+    statsgo_kf = ensure_cache("kf", fire, args[0])
+    if kf_mode == "none":
+        shutil.copy(statsgo_kf, inputs / "kf.tif")
+        print("kf        : STATSGO KFFACT, gaps left empty (--kf-fill none)")
+    else:
+        # has_dem (above) limits the fill to pixels with elevation; None for the LiDAR DEM,
+        # which is on its own grid, and then the whole buffer is filled
+        kf, sources["kf"] = fill_kf(fire, statsgo_kf, geom, crs, transform, width, height,
+                                    kf_mode, has_dem)
+        write(inputs / "kf.tif", np.nan_to_num(kf, nan=-9999.0), crs, transform, -9999.0, "float32")
 
     # dNBR
     if dnbr_source == "baer":
@@ -429,8 +675,13 @@ def main():
     elif dnbr_source.startswith("s2:"):
         src = ROOT / "data" / "s2_dnbr" / key / dnbr_source[3:] / "dnbr.tif"
         shutil.copy(src, inputs / "dnbr.tif")
-        print(f"dnbr      : Sentinel-2 {src.parent.name}")
-        sources["dnbr"] = "Sentinel-2 dNBR"
+        # which sensor and method sentinel2_dnbr.py ended up using (its fallbacks)
+        sel = src.parent / "selection.json"
+        sel = json.loads(sel.read_text()) if sel.exists() else {}
+        sensor, method = sel.get("sensor", "Sentinel-2"), sel.get("method", "single date")
+        print(f"dnbr      : {sensor} {src.parent.name}, {method}")
+        sources["dnbr"] = f"{sensor} dNBR" + ("" if method in ("single date", "forced dates")
+                                              else f" ({method})")
     else:
         raise SystemExit(f"unknown --dnbr {dnbr_source}")
 
@@ -462,6 +713,18 @@ def main():
         # "EROS BARC Package" (the satellite classification before any field check)
         sources["severity"] = (f"{u['sources'].get('severity') or 'BAER'} burn severity, "
                                f"published with USGS assessment {u['code']}")
+    elif severity_source == "baersbs":
+        # The Forest Service BAER team's map, from its public image service (baer_sbs.py)
+        b = fire["baer_sbs"]
+        with rasterio.open(ROOT / b["path"]) as s:
+            sbs, profile = s.read(1), s.profile
+        sbs = np.where(np.isin(sbs, [1, 2, 3, 4]), sbs, 0).astype("uint8")
+        profile.update(nodata=0)
+        with rasterio.open(inputs / "severity.tif", "w", **profile) as dst:
+            dst.write(sbs, 1)
+        counts = {int(k): int(v) for k, v in zip(*np.unique(sbs[sbs > 0], return_counts=True))}
+        print(f"severity  : Forest Service BAER SBS {b['name']}, BARC4 counts {counts}")
+        sources["severity"] = f"BAER Team soil burn severity (Forest Service BAER map {b['name']})"
     elif severity_source == "estimate":
         config = config.replace('severity = r"severity"', "severity = None")
         config += "\nestimate_severity = True\nseverity_thresholds = [125, 250, 500]\n"

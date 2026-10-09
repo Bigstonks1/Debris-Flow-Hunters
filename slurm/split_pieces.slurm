@@ -23,8 +23,11 @@
 
 set -euo pipefail
 : "${PROJECT:?set PROJECT, e.g. --export=ALL,PROJECT=data/wapiti_baer_baer_lidar1m}"
-cd "$HOME/scratch/Debris-Flow-Hunters"
+cd "${SLURM_SUBMIT_DIR:-$HOME/scratch/Debris-Flow-Hunters}"   # the repository the job was submitted from
 source .venv/bin/activate
+# A private numba cache per task: tasks building the shared cache at the same time corrupt it
+export NUMBA_CACHE_DIR="${TMPDIR:-/tmp}/numba_${SLURM_JOB_ID}"
+trap 'rm -rf "$NUMBA_CACHE_DIR"' EXIT
 echo "piece ${SLURM_ARRAY_TASK_ID} of ${PROJECT} on $(hostname), $(date)"
 python pipeline/split_fire.py run "$PROJECT" --piece "${SLURM_ARRAY_TASK_ID}" ${BUILD:+--build}
 echo "done $(date)"

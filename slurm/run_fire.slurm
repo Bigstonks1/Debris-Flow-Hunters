@@ -26,8 +26,12 @@ if [ -z "${FIRE_ID:-}" ]; then
     : "${FIRE:?set FIRE_ID (e.g. 2025-IDPAF-005844) or FIRE and YEAR}"
     : "${YEAR:?set YEAR}"
 fi
-cd "$HOME/scratch/Debris-Flow-Hunters"
+cd "${SLURM_SUBMIT_DIR:-$HOME/scratch/Debris-Flow-Hunters}"   # the repository the job was submitted from
 source .venv/bin/activate
+# A private numba cache per job: the app submits several fires at once, and jobs building the
+# shared cache at the same time corrupt it
+export NUMBA_CACHE_DIR="${TMPDIR:-/tmp}/numba_${SLURM_JOB_ID}"
+trap 'rm -rf "$NUMBA_CACHE_DIR"' EXIT
 
 echo "fire: ${FIRE_ID:-${FIRE:-} ${YEAR:-} ${STATE:-}} on $(hostname), $(date)"
 # WFIGS, USGS's assessment service, Sentinel-2 search and imagery, USGS DEM tiles,

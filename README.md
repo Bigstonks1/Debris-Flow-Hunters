@@ -64,12 +64,36 @@ Open http://127.0.0.1:8000. Then:
 2. Click **Run assessment**. The stages show as they run. Small fires take about 1 minute,
    the largest (500+ km²) about 10.
 3. The fire appears on the map. Drag the **storm** slider, switch what the map **shows**,
-   click a stream for its numbers, and download it under **Download this fire**.
+   and click a stream for its numbers.
 4. Fires added in the app are **not kept** until you click **Keep**. **Delete** moves a fire
    to **Deleted fires**, where you can restore it or delete it permanently.
 
+At the bottom of the side panel are three sections:
+- **Configuration**: **Settings: HPC cluster** and **Run a list of fires**.
+- **Logs**:
+  - **Batches**: pick a batch from the list to see its fires, steps, errors and log;
+  - **Input data for this fire**: each input layer and the service it came from;
+  - **Deleted fires**.
+- **Exports**: **Download this fire** as GeoJSON, CSV, shapefiles or a file geodatabase.
+
 The app starts empty; every fire you run is stored under `data/` (not in git). Fires from
 2016 onward work (Sentinel-2 imagery starts in 2016).
+
+**Several fires at once:** tick the checkbox on each search result (selections stay across
+searches), or open **Run a list of fires** and paste one fire per line. Choose where to run
+and click **Run**. Progress shows under **Batches**, and each fire appears on the map as it
+finishes.
+
+**On an HPC cluster from the app:** you need your own account on a Slurm cluster. Copy this
+repository there and run `uv sync` once. Then open **Settings: HPC cluster** and enter:
+- the login host and your user name (and a jump host, if your cluster uses one);
+- the folder you copied the repository to;
+- the Slurm partition.
+
+Click **Test connection**. If your SSH key is already on the cluster, nothing else is needed.
+If the cluster needs a password, save it in the settings. It is stored in your system's password store (Windows Credential Manager, macOS Keychain,
+or the keyring on a Linux desktop), never in a file. Batches then offer the cluster as a place to run. The batch runs
+there on its own, and the app copies each finished fire back to this computer.
 
 ### One fire from the command line
 
@@ -81,6 +105,21 @@ uv run python pipeline/run_fire.py "Rush" 2025 ID             # by name, year, s
 Results go to `data/<fire>_<inputs>/exports/` (shapefiles). `uv run python map/build_map.py`
 writes every finished fire into one offline map, `map/dist/debris_flow_map.html`.
 
+### Many fires at once (batch)
+
+Put one fire per line in a text file: a Unique Fire ID (`2025-IDPAF-005844`) or
+`name,year,state` (`Rush,2025,ID`; the state only matters when the name is shared). Then:
+
+```bash
+uv run python pipeline/batch.py all my_fires.txt --runner local --workers 3
+```
+
+Each fire runs exactly as a single fire would; 3-4 at a time suits a 6-core computer. Lines
+that match no fire or several fires are left out with the reason, a failed fire does not stop
+the others, and fires already assessed are skipped (`--force` re-runs them). Results:
+`data/batches/<batch>/summary.csv` (one row per fire: status, times, threshold, agreement with
+USGS) and a log per fire in `data/batches/<batch>/logs/`. They also appear in the app.
+
 ### On an HPC cluster (Slurm)
 
 The same pipeline runs as Slurm jobs; see `slurm/`. Copy the repository to the cluster,
@@ -90,18 +129,28 @@ run `uv sync` there, then from the repository root:
 mkdir -p logs
 sbatch --export=ALL,FIRE_ID=2025-IDPAF-005844 slurm/run_fire.slurm          # one fire, 10 m
 sbatch --export=ALL,CONFIG=fires/<fire>.json,RES=1 slurm/split_prepare.slurm   # one fire at 1 m LiDAR
+python pipeline/batch.py all my_fires.txt --runner slurm --max-running 20   # many fires, 10 m
 ```
 
+Lemhi's compute nodes have no internet, so a cluster batch runs in three stages from the
+login node: it downloads and prepares each fire's inputs there (2 fires at a time, at low
+priority), submits one Slurm job array that runs only the model on the compute nodes (one fire
+per task, 4 cores and 16 GB each, at most `--max-running` at once), and, when the array has
+finished, `python pipeline/batch.py finish <batch>` runs the USGS comparison and writes
+`summary.csv` (or add `--wait` to the run command to have it wait and finish by itself). On a
+cluster whose compute nodes can download, `--compute-internet` runs each whole fire in the
+array instead.
+
 The 1 m job splits the fire into drainage pieces and runs them as a job array, one piece
-per node; see `design.md`, "Watershed split". The scripts assume the repository is at
-`~/scratch/Debris-Flow-Hunters`. The app can also submit runs to Slurm when it runs on the
+per node; see `design.md`, "Watershed split". Submit from the repository's folder: the scripts run in the folder
+they were submitted from (default `~/scratch/Debris-Flow-Hunters`). The app can also submit runs to Slurm when it runs on the
 cluster: `uv run python app/server.py --runner slurm`.
 
 ## Where things are
 
 | Folder | What is in it |
 | --- | --- |
-| `app/` | The local web app (`server.py`): find, run, map, keep/delete and export fires |
+| `app/` | The local web app (`server.py`): find, run, map, keep/delete and export fires; batches here or on a cluster (`batches.py`, `hpc.py`) |
 | `map/` | The map page (`template.html`) and the offline map builder (`build_map.py`) |
 | `pipeline/` | Every step from a fire name to a finished assessment; `run_fire.py` runs them all |
 | `slurm/` | Batch scripts for an HPC cluster |

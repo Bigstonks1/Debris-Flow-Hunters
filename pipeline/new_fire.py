@@ -4,7 +4,8 @@ Everything the pipeline needs comes from the fire's WFIGS interagency perimeter 
 dates, state, a UTM CRS from the perimeter's centroid, the Unique Fire Identifier (see
 fires.py) and whether a RECOVER bundle exists (RECOVER is optional, see
 pipeline/recover.py). A fire that already has a config (matched by its Unique Fire ID) is
-left as is: hand-written fields such as a BAER package or a USGS reference live there.
+left as is: hand-written fields such as a BAER package or a USGS reference live there. Its
+dates are refreshed from WFIGS on every run by pipeline/recover.py.
 
     python pipeline/new_fire.py "Rush" 2025 [ID]         # state, when the name is not unique
     python pipeline/new_fire.py --id 2025-IDPAF-005844
@@ -14,13 +15,12 @@ import json
 import sys
 import urllib.error
 import urllib.request
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from shapely.geometry import Polygon
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from fires import FIRES, describe, find_config, lookup, slug  # noqa: E402
+from fires import FIRES, describe, find_config, lookup, slug, wfigs_dates  # noqa: E402
 from recover import BUNDLE  # noqa: E402
 
 RECOVER_MEMBERS = ["TopographyElevation_WesternUS_be.tif", "TopographyElevation_WesternUS_be.tfw",
@@ -48,11 +48,7 @@ def ensure_config(name=None, year=None, state=None, uid=None):
     ring = max((Polygon(r) for r in feature["geometry"]["rings"]), key=lambda p: p.area)
     lon, lat = ring.centroid.x, ring.centroid.y
     zone = int((lon + 180) // 6) + 1
-    day = lambda ms: datetime.fromtimestamp(ms / 1000, timezone.utc).date() if ms else None
-    ignition = day(a["attr_FireDiscoveryDateTime"])
-    # WFIGS often leaves containment blank; fall back to fire-out, then to ignition + 90 days
-    containment = (day(a["attr_ContainmentDateTime"]) or day(a["attr_FireOutDateTime"])
-                   or ignition + timedelta(days=90))
+    ignition, containment = wfigs_dates(a)
     bundle = BUNDLE.format(year=card["year"], unit=a["attr_POOProtectingUnit"],
                            local_id=a["attr_LocalIncidentIdentifier"])
     try:
@@ -69,7 +65,7 @@ def ensure_config(name=None, year=None, state=None, uid=None):
         "name": card["name"], "key": key, "unique_id": card["unique_id"],
         "irwin_id": a["attr_IrwinID"],
         "year": card["year"], "state": card["state"], "county": card["county"],
-        "ignition": ignition.isoformat(), "containment": containment.isoformat(),
+        "ignition": ignition, "containment": containment,
         "crs": (32600 if lat >= 0 else 32700) + zone,
         "wfigs_name": a["poly_IncidentName"],
         "wfigs_unit": a["attr_POOProtectingUnit"],

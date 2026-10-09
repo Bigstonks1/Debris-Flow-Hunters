@@ -21,6 +21,30 @@ ROOT = Path(__file__).resolve().parent.parent
 FIRES = ROOT / "fires"
 WFIGS = ("https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/"
          "WFIGS_Interagency_Perimeters/FeatureServer/0/query")
+def wfigs_dates(a):
+    """(ignition, containment) as ISO dates from a WFIGS record's attributes. WFIGS often
+    leaves containment blank: fall back to fire-out, then to ignition + 90 days."""
+    from datetime import datetime, timedelta, timezone
+    day = lambda ms: datetime.fromtimestamp(ms / 1000, timezone.utc).date() if ms else None
+    ignition = day(a.get("attr_FireDiscoveryDateTime"))
+    containment = (day(a.get("attr_ContainmentDateTime")) or day(a.get("attr_FireOutDateTime"))
+                   or ignition + timedelta(days=90))
+    return ignition.isoformat(), containment.isoformat()
+
+
+# A fire's wildcat project folders, data/<key><suffix>, in order of preference: USGS-published
+# dNBR and severity; Sentinel-2 dNBR with the Forest Service BAER severity map
+# (pipeline/baer_sbs.py); Sentinel-2 dNBR with severity estimated by wildcat.
+PROJECT_SUFFIXES = ("_usgs_usgs", "_s2_auto_baersbs", "_s2_auto_estimate")
+
+
+def finished_project(key, root=None):
+    """The preferred project with exported results for a fire key, or None."""
+    root = Path(root) if root else ROOT
+    return next((root / "data" / f"{key}{s}" for s in PROJECT_SUFFIXES
+                 if (root / "data" / f"{key}{s}" / "exports" / "segments.shp").exists()), None)
+
+
 UID_RE = re.compile(r"^\d{4}-[A-Z]{2}[A-Z0-9]{2,6}-[A-Z0-9]{1,10}$")
 FIELDS = ("poly_IncidentName,poly_GISAcres,attr_FireDiscoveryDateTime,attr_ContainmentDateTime,"
           "attr_FireOutDateTime,attr_POOState,attr_POOCounty,attr_POOProtectingUnit,"

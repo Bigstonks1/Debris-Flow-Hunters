@@ -25,10 +25,19 @@ flows, Graber models, Trail Creek case study) live on `wapiti-e2e`, not here.
 uv sync                                                  # install (Python 3.12, pfdf, wildcat)
 uv run python app/server.py                              # app at http://127.0.0.1:8000
 uv run python app/server.py --runner slurm               # app submitting runs to Slurm (on the cluster)
+                                                         # batches to any cluster: Settings > HPC in the app
 uv run python pipeline/run_fire.py --id 2025-IDPAF-005844   # one fire end to end, by Unique Fire ID
 uv run python pipeline/run_fire.py "Rush" 2025 ID        # by name, year, state
 uv run python pipeline/run_fire.py --id <UID> --split --workers 4   # wildcat by watershed pieces
+uv run python pipeline/run_fire.py --id <UID> --kf-fill none        # KF gaps left empty, as USGS does (default: SSURGO, then median)
+uv run python pipeline/run_fire.py --id <UID> --no-baer-sbs         # skip the Forest Service BAER severity map
+DFH_DEM_SOURCE=service uv run python pipeline/run_fire.py --id <UID>   # force the DEM fallback (3DEP image service), for testing
+uv run python pipeline/sentinel2_dnbr.py fires/<key>.json --sensor landsat   # dNBR from Landsat 8/9 only (comparison)
+DFH_DNBR_SENSOR=landsat DFH_DNBR_METHOD=composite uv run python pipeline/run_fire.py fires/<key>.json   # force a dNBR fallback end to end (testing)
 uv run python pipeline/usgs_check.py fires/<key>.json [data/<project>]   # compare with USGS
+uv run python pipeline/batch.py all fires.txt --runner local --workers 3   # many fires on this computer
+python pipeline/batch.py all fires.txt --runner slurm [--wait]   # on Lemhi's login node: inputs here, model on compute nodes
+python pipeline/batch.py finish <batch>                  # after the array: USGS comparison + summary.csv
 uv run python pipeline/split_fire.py all data/<project>  # split: plan, build, run, merge, compare
 uv run python pipeline/run_wildcat.py data/<project> [preprocess|assess|export]   # wildcat by hand
 uv run python map/build_map.py                           # offline map: map/dist/debris_flow_map.html
@@ -55,9 +64,28 @@ exists yet; if you add tests, add the runner to `pyproject.toml` and list it her
   `fires.fire_key()`; match data folders to the *longest* key they start with.
 - **`data/` is never committed** and can be large (0.1–4 GB per fire). `fires/*.json` is
   written by the pipeline; do not hand-edit keys the pipeline writes.
+- **Lemhi's compute nodes have no internet** (no DNS, no route). Anything that downloads
+  (`run_fire.py --phase inputs` and `--phase usgs`) runs on the login node; compute jobs run
+  only `--phase wildcat`. Keep new network calls out of the wildcat phase.
+- **Batches resolve fire configs serially, then run fires in parallel** (`pipeline/batch.py`).
+  Never create `fires/*.json` from parallel runs: two same-named fires could collide.
+- **numba's compiled-code cache must not be built by several processes at once**: it is
+  corrupted ("KeyError: int64 generator(...)" in assess). Parallel local runs start with one
+  run alone; Slurm scripts give each job its own `NUMBA_CACHE_DIR`. Deleting `__pycache__`
+  folders inside `.venv` empties that cache.
+- **wildcat's outlets file is not in basin order** (it removes nested drainages between saving
+  basins and outlets). Pair outlets with basins by location: an outlet is the downstream end
+  of its basin's terminal segment (`Segment_ID`).
 - **Every stage is a subprocess** writing to `data/`; `run_fire.py` stage banners
   (`===== name =====`) are parsed by `app/server.py` (`STAGES`). Keep them when editing.
-- **Slurm scripts end in `.slurm`** and assume the repo at `~/scratch/Debris-Flow-Hunters`.
+- **Slurm scripts end in `.slurm`** and run in the folder they were submitted from
+  (`SLURM_SUBMIT_DIR`, default `~/scratch/Debris-Flow-Hunters`).
+- **HPC credentials never go in files.** The app's cluster password lives in the OS
+  password store via `keyring` (`app/hpc.py`; Credential Manager, Keychain or Secret Service); `data/hpc_settings.json` holds no secrets
+  and API responses only say whether one is saved. Keep it that way, and keep anything typed
+  in the page out of remote shell commands unless validated or `shlex.quote`d.
+- **App batches read `pipeline/batch.py`'s files** (`fires.tsv`, `status/*.json`), locally
+  and over SFTP. Changing their format breaks the app's Batches panel and HPC copy-back.
 - More traps (DEM projection, nodata labels, WFIGS geometry, Windows GDAL hangs): `design.md` §9.
 
 ## Project conventions

@@ -37,6 +37,8 @@ Smoke is not a SCL class, so smoky scenes can pass; reported, not corrected.
 import json
 import os
 import sys
+import time
+import urllib.error
 import urllib.request
 from datetime import date, timedelta
 from pathlib import Path
@@ -60,11 +62,28 @@ sys.path.insert(0, str(ROOT / "pipeline"))
 from fires import fire_key  # noqa: E402
 STAC = "https://earth-search.aws.element84.com/v1/search"
 COLLECTION = "sentinel-2-c1-l2a"
+# Landsat 8/9 Collection 2 Level-2 on Microsoft's Planetary Computer: free, no account. Its
+# files are read with a short-lived anonymous token from the SAS endpoint. (Earth Search also
+# lists Landsat, but its files sit in USGS's requester-pays bucket, which costs money.)
+PC_STAC = "https://planetarycomputer.microsoft.com/api/stac/v1/search"
+PC_TOKEN = "https://planetarycomputer.microsoft.com/api/sas/v1/token/landsat-c2-l2"
 RES = 20
 PAD_M = 4000                          # wildcat buffers the perimeter by 3 km
 CLEAR_MIN = 0.98
 NOT_CLEAR = {0, 1, 3, 8, 9, 10, 11}   # no data, saturated, shadow, cloud med/high, cirrus, snow
 SCALE, OFFSET = 0.0001, -0.1
+# Landsat QA_PIXEL bits: 0 fill, 1 dilated cloud, 2 cirrus, 3 cloud, 4 cloud shadow, 5 snow
+LANDSAT_NOT_CLEAR = 0b111111
+SENSORS = {
+    "Sentinel-2": dict(stac=STAC, collection=COLLECTION, query=None, nir="nir08", swir="swir22",
+                       qa="scl", scale=SCALE, offset=OFFSET),
+    "Landsat 8/9": dict(stac=PC_STAC, collection="landsat-c2-l2",
+                        query={"platform": {"in": ["landsat-8", "landsat-9"]}},
+                        nir="nir08", swir="swir22", qa="qa_pixel", scale=0.0000275, offset=-0.2),
+}
+# Composites, when no single date is clear enough: per pixel, the nearest date clear there.
+COMPOSITE_DATE_MIN = 0.2              # a date must be at least this clear to contribute
+COMPOSITE_MAX_DATES = 6
 FILL = -32768
 BURNED_DNBR = 100
 PLATEAU = 0.02
@@ -98,7 +117,7 @@ class Grid:
         """Mosaic one band from all tiles of a date onto the grid (first valid wins)."""
         out = np.zeros((self.height, self.width), dtype="uint16")
         for item in items:
-            with rasterio.open(item["assets"][band]["href"]) as src, WarpedVRT(
+            with rasterio.open(href(item, band)) as src, WarpedVRT(
                     src, crs=self.crs, transform=self.transform, width=self.width,
                     height=self.height, resampling=Resampling.nearest, nodata=0) as vrt:
                 data = vrt.read(1)
@@ -106,13 +125,38 @@ class Grid:
         return out
 
 
+SENSOR = SENSORS["Sentinel-2"]       # the sensor in use; main() switches it for the fallback
+_token = {}
+
+
+def href(item, band):
+    url = item["assets"][SENSOR[band]]["href"]
+    if SENSOR["stac"] == PC_STAC:       # Planetary Computer: append the anonymous read token
+        if not _token or time.time() > _token["at"] + 1800:
+            _token.update(token=get_json(PC_TOKEN)["token"], at=time.time())
+        url += "?" + _token["token"]
+    return url
+
+
+def get_json(url, body=None, tries=4):
+    for i in range(tries):      # both services return the odd 502/504
+        try:
+            req = urllib.request.Request(url, data=json.dumps(body).encode() if body else None,
+                                         headers={"Content-Type": "application/json"})
+            return json.load(urllib.request.urlopen(req, timeout=180))
+        except urllib.error.HTTPError as e:
+            if e.code < 500 or i == tries - 1:
+                raise
+            time.sleep(5 * (i + 1))
+
+
 def search(grid, start, end):
-    body = {"collections": [COLLECTION], "bbox": grid.bbox_wgs84, "limit": 500,
+    body = {"collections": [SENSOR["collection"]], "bbox": grid.bbox_wgs84, "limit": 500,
             "datetime": f"{start.isoformat()}T00:00:00Z/{end.isoformat()}T23:59:59Z"}
-    req = urllib.request.Request(STAC, data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json"})
+    if SENSOR["query"]:
+        body["query"] = SENSOR["query"]
     by_date = {}
-    for item in json.load(urllib.request.urlopen(req, timeout=180))["features"]:
+    for item in get_json(SENSOR["stac"], body)["features"]:
         by_date.setdefault(item["properties"]["datetime"][:10], []).append(item)
     return by_date
 
@@ -130,8 +174,11 @@ class Scenes:
                 self.clear[day] = (0.0, None)
                 print(f"    {day}: skipped (least-cloudy tile {tile_cloud:.0f}%)")
             else:
-                scl = self.grid.read(items, "scl")
-                mask = ~np.isin(scl, list(NOT_CLEAR))
+                qa = self.grid.read(items, "qa")
+                if SENSOR["qa"] == "scl":
+                    mask = ~np.isin(qa, list(NOT_CLEAR))
+                else:                   # Landsat QA_PIXEL: no fill, cloud, shadow or snow bit
+                    mask = (qa & LANDSAT_NOT_CLEAR) == 0
                 self.clear[day] = (mask[self.grid.inside].mean(), mask)
                 print(f"    {day}: {self.clear[day][0]:.1%} of perimeter clear ({len(items)} tiles)")
         return self.clear[day]
@@ -141,10 +188,11 @@ class Scenes:
 
     def nbr_of(self, day, items):
         if day not in self.nbr:
-            nir = self.grid.read(items, "nir08").astype(float)
-            swir = self.grid.read(items, "swir22").astype(float)
+            nir = self.grid.read(items, "nir").astype(float)
+            swir = self.grid.read(items, "swir").astype(float)
             valid = (nir > 0) & (swir > 0)
-            nir, swir = nir * SCALE + OFFSET, swir * SCALE + OFFSET
+            scale, offset = SENSOR["scale"], SENSOR["offset"]
+            nir, swir = nir * scale + offset, swir * scale + offset
             with np.errstate(divide="ignore", invalid="ignore"):
                 value = (nir - swir) / (nir + swir)
             self.nbr[day] = (value, valid & np.isfinite(value))
@@ -189,56 +237,145 @@ def plateau_post(scenes, by_date, provisional_pre, pre_items):
     return history[-1][0], history
 
 
+def single_date(scenes, grid, ignition, containment):
+    """The date rule above: one clear pre and one clear post date."""
+    print("provisional pre-fire (latest clear in the 60 days before ignition):")
+    pre_dates = search(grid, ignition - timedelta(days=60), ignition - timedelta(days=1))
+    provisional = latest_clear(scenes, pre_dates, "pre-fire")
+    print("post-fire, looking for the burned-area plateau:")
+    post_dates = search(grid, ignition + timedelta(days=14), containment + timedelta(days=30))
+    post_day, history = plateau_post(scenes, post_dates, provisional, pre_dates[provisional])
+    gap = (date.fromisoformat(post_day) - ignition).days
+    if gap <= SAME_YEAR_DAYS:
+        pre_day = provisional
+        print(f"pre-fire: post is {gap} d after ignition -> same-year pre {pre_day}")
+    else:
+        target = date.fromisoformat(post_day) - timedelta(days=365)
+        print(f"pre-fire: post is {gap} d after ignition -> anniversary pre near {target}:")
+        pre_dates = search(grid, target - timedelta(days=30), target + timedelta(days=30))
+        pre_day = nearest_clear(scenes, pre_dates, target, "anniversary pre-fire")
+    pre, pre_ok = scenes.nbr_of(pre_day, pre_dates[pre_day])
+    post, post_ok = scenes.nbr_of(post_day, post_dates[post_day])
+    return (pre, pre_ok & scenes.clear[pre_day][1], post, post_ok & scenes.clear[post_day][1],
+            dict(method="single date", pre=[pre_day], post=[post_day],
+                 burned_fraction_history=history,
+                 pre_tiles=[i["id"] for i in pre_dates[pre_day]],
+                 post_tiles=[i["id"] for i in post_dates[post_day]]))
+
+
+def composite(scenes, by_date, target, label):
+    """Per pixel, the NBR of the date nearest `target` on which that pixel is clear, from at
+    most COMPOSITE_MAX_DATES dates that are each at least COMPOSITE_DATE_MIN clear, until
+    CLEAR_MIN of the perimeter is covered. Returns (nbr, valid, dates used)."""
+    grid = scenes.grid
+    nbr = np.full((grid.height, grid.width), np.nan)
+    have = np.zeros((grid.height, grid.width), dtype=bool)
+    used = []
+    for day in sorted(by_date, key=lambda d: (abs((date.fromisoformat(d) - target).days), d)):
+        fraction, mask = scenes.clear_mask(day, by_date[day])
+        if fraction < COMPOSITE_DATE_MIN:
+            continue
+        value, ok = scenes.nbr_of(day, by_date[day])
+        take = ok & mask & ~have
+        if not take[grid.inside].any():
+            continue
+        nbr[take] = value[take]
+        have |= take
+        used.append(day)
+        cover = have[grid.inside].mean()
+        print(f"      {label} composite: + {day} -> {cover:.1%} of perimeter covered")
+        if cover >= CLEAR_MIN or len(used) == COMPOSITE_MAX_DATES:
+            break
+    cover = have[grid.inside].mean()
+    if not used or cover < CLEAR_MIN:
+        raise SystemExit(f"no {label} composite covers {CLEAR_MIN:.0%} of the perimeter "
+                         f"({cover:.1%} from {len(used)} dates)")
+    return nbr, have, used
+
+
+def composites(scenes, grid, ignition, containment):
+    """Pre and post composites. Post: dates from ignition + 14 d to containment + 30 d,
+    nearest containment first (the fire at full extent). Pre: as the single-date rule, the
+    60 days before ignition when the post dates are within SAME_YEAR_DAYS of it, otherwise
+    the same season a year earlier."""
+    post_dates = search(grid, ignition + timedelta(days=14), containment + timedelta(days=30))
+    post, post_ok, post_used = composite(scenes, post_dates, containment, "post-fire")
+    middle = sorted(post_used)[len(post_used) // 2]
+    if (date.fromisoformat(middle) - ignition).days <= SAME_YEAR_DAYS:
+        pre_dates = search(grid, ignition - timedelta(days=60), ignition - timedelta(days=1))
+        pre, pre_ok, pre_used = composite(scenes, pre_dates, ignition, "pre-fire")
+    else:
+        target = date.fromisoformat(middle) - timedelta(days=365)
+        pre_dates = search(grid, target - timedelta(days=45), target + timedelta(days=45))
+        pre, pre_ok, pre_used = composite(scenes, pre_dates, target, "anniversary pre-fire")
+    return pre, pre_ok, post, post_ok, dict(
+        method=f"composite of {len(pre_used)} pre and {len(post_used)} post dates",
+        pre=sorted(pre_used), post=sorted(post_used))
+
+
 def main():
+    global SENSOR
     args = sys.argv[1:]
     fire = json.loads(Path(args[0]).read_text())
     forced = {k: date.fromisoformat(args[args.index(k) + 1]) for k in ("--pre", "--post")
               if k in args}
     ignition = date.fromisoformat(fire["ignition"])
     containment = date.fromisoformat(fire["containment"])
+    # --sensor, or DFH_DNBR_SENSOR / DFH_DNBR_METHOD (single|composite) to force a fallback
+    # through a whole run_fire.py run, for testing
+    only = args[args.index("--sensor") + 1] if "--sensor" in args else os.environ.get("DFH_DNBR_SENSOR")
+    only_method = os.environ.get("DFH_DNBR_METHOD")
     tag = ("forced_" + "_".join(forced[k].strftime("%Y%m%d") for k in ("--pre", "--post"))
-           if forced else "auto")
+           if forced else "auto" if not only or "--sensor" not in args else f"only_{only}")
     out_dir = ROOT / "data" / "s2_dnbr" / fire_key(fire) / tag
     out_dir.mkdir(parents=True, exist_ok=True)
-
     geom = load_perimeter(fire)
     grid = Grid(geom, f"EPSG:{fire['crs']}")
-    scenes = Scenes(grid)
     print(f"grid: {grid.width} x {grid.height} at {RES} m, EPSG:{fire['crs']}; "
           f"perimeter {int(grid.inside.sum())} px")
 
-    history = None
     if forced:
+        sensor = "Sentinel-2"
+        scenes = Scenes(grid)
         pre_dates = search(grid, forced["--pre"], forced["--pre"])
         post_dates = search(grid, forced["--post"], forced["--post"])
         pre_day, post_day = forced["--pre"].isoformat(), forced["--post"].isoformat()
         for d, dates in ((pre_day, pre_dates), (post_day, post_dates)):
             scenes.clear_mask(d, dates[d])
+        pre, pre_ok = scenes.nbr_of(pre_day, pre_dates[pre_day])
+        post, post_ok = scenes.nbr_of(post_day, post_dates[post_day])
+        pre_ok &= scenes.clear[pre_day][1]
+        post_ok &= scenes.clear[post_day][1]
+        meta = dict(method="forced dates", pre=[pre_day], post=[post_day])
     else:
-        print("provisional pre-fire (latest clear in the 60 days before ignition):")
-        pre_dates = search(grid, ignition - timedelta(days=60), ignition - timedelta(days=1))
-        provisional = latest_clear(scenes, pre_dates, "pre-fire")
-        print("post-fire, looking for the burned-area plateau:")
-        post_dates = search(grid, ignition + timedelta(days=14),
-                            containment + timedelta(days=30))
-        post_day, history = plateau_post(scenes, post_dates, provisional, pre_dates[provisional])
-        gap = (date.fromisoformat(post_day) - ignition).days
-        if gap <= SAME_YEAR_DAYS:
-            pre_day = provisional
-            print(f"pre-fire: post is {gap} d after ignition -> same-year pre {pre_day}")
-        else:
-            target = date.fromisoformat(post_day) - timedelta(days=365)
-            print(f"pre-fire: post is {gap} d after ignition -> anniversary pre near {target}:")
-            pre_dates = search(grid, target - timedelta(days=30), target + timedelta(days=30))
-            pre_day = nearest_clear(scenes, pre_dates, target, "anniversary pre-fire")
+        # Fallbacks, all free: Sentinel-2 single dates (the rule above), a Sentinel-2
+        # composite, then the same two with Landsat 8/9 (more clear dates, and before 2016).
+        # --sensor landsat|sentinel2 tries one sensor only (for comparisons).
+        sensors = {"landsat": ["Landsat 8/9"], "sentinel2": ["Sentinel-2"]}.get(
+            only, ["Sentinel-2", "Landsat 8/9"])
+        failures, result = [], None
+        for sensor in sensors:
+            SENSOR = SENSORS[sensor]
+            scenes = Scenes(grid)
+            for method in [m for m in (single_date, composites)
+                           if not only_method or m.__name__.startswith(only_method)]:
+                print(f"--- {sensor}, {method.__name__.replace('_', ' ')}")
+                try:
+                    result = method(scenes, grid, ignition, containment)
+                    break
+                except SystemExit as e:
+                    failures.append(f"{sensor} {method.__name__.replace('_', ' ')}: {e}")
+                    print(f"    {e}")
+            if result:
+                break
+        if not result:
+            raise SystemExit("no usable imagery: " + "; ".join(failures))
+        pre, pre_ok, post, post_ok, meta = result
+        meta["fallbacks_tried"] = failures
 
-    pre_items, post_items = pre_dates[pre_day], post_dates[post_day]
-    pre, pre_ok = scenes.nbr_of(pre_day, pre_items)
-    post, post_ok = scenes.nbr_of(post_day, post_items)
-    ok = pre_ok & post_ok & scenes.clear[pre_day][1] & scenes.clear[post_day][1]
+    ok = pre_ok & post_ok
     dnbr = np.full((grid.height, grid.width), FILL, dtype="int16")
     dnbr[ok] = np.clip(np.round((pre[ok] - post[ok]) * 1000), -2000, 2000).astype("int16")
-
     profile = dict(driver="GTiff", height=grid.height, width=grid.width, count=1,
                    dtype="int16", crs=grid.crs, transform=grid.transform, nodata=FILL,
                    compress="deflate", tiled=True)
@@ -247,10 +384,7 @@ def main():
 
     ring = ~geometry_mask([mapping(geom.buffer(1500))], dnbr.shape, grid.transform)
     ring &= ~grid.inside & ok
-    summary = dict(pre=pre_day, post=post_day,
-                   pre_tiles=[i["id"] for i in pre_items],
-                   post_tiles=[i["id"] for i in post_items],
-                   burned_fraction_history=history,
+    summary = dict(sensor=sensor, **meta,
                    valid_in_perimeter=float(ok[grid.inside].mean()),
                    dnbr_perimeter_pct10_50_90=np.percentile(
                        dnbr[grid.inside & ok], [10, 50, 90]).tolist(),

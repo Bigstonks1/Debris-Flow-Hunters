@@ -83,16 +83,6 @@ select {
 .legend .row .sev { width: 16px; height: 12px; border-radius: 3px; border: 1px solid var(--ring); }
 .legend .cap { font-size: 12px; color: var(--muted); margin-bottom: 2px; }
 .toggles label { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 3px 0; cursor: pointer; }
-.formula summary { font-size: 12px; font-weight: 600; color: var(--ink-2); cursor: pointer;
-                   text-transform: uppercase; letter-spacing: 0.04em; }
-.formula .eq { font: 12.5px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace;
-               background: var(--control); border-radius: 6px; padding: 8px 10px; margin: 8px 0 6px;
-               overflow-x: auto; white-space: nowrap; }
-.formula p { font-size: 12.5px; color: var(--ink-2); margin: 4px 0; }
-.formula table { border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; margin: 6px 0; }
-.formula td, .formula th { padding: 2px 10px 2px 0; text-align: left; }
-.formula th { color: var(--ink-2); font-weight: 600; }
-.formula .src { font-size: 11.5px; color: var(--muted); }
 .app input { font: inherit; font-size: 13px; color: var(--ink); background: var(--control);
              border: 1px solid var(--ring); border-radius: 8px; padding: 7px 9px; width: 100%; }
 .app .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
@@ -110,18 +100,52 @@ select {
 .pick .where { font-size: 12.5px; color: var(--ink-2); }
 .pick .uid { font: 11.5px ui-monospace, "Cascadia Mono", Consolas, monospace; color: var(--muted); }
 .pick .badge { font-size: 11px; font-weight: 600; color: var(--accent); margin-left: 6px; }
-#run-status.err { color: var(--accent); }
+#run-status.err, #list-status.err, .batch .err { color: var(--accent); }
 .app button.quiet { background: var(--control); color: var(--ink); border: 1px solid var(--ring); }
 .app button.quiet.armed { background: var(--accent); color: #fff; border-color: var(--accent); }
 .app button#keep[aria-pressed="false"] { background: var(--control); color: var(--ink); border: 1px solid var(--ring); }
 .manage .explain { margin: 6px 0 0; }
-#trash-box { margin-top: 8px; font-size: 13px; }
-#trash-box summary { cursor: pointer; color: var(--ink-2); }
 .trash-row { border: 1px solid var(--hairline); border-radius: 8px; padding: 8px 10px; margin-top: 6px; }
 .trash-row .where { font-size: 12px; color: var(--muted); }
 .trash-row .row2 button { margin-top: 6px; font-size: 12px; padding: 6px 8px; }
-.foot { font-size: 12px; color: var(--muted); border-top: 1px solid var(--hairline); padding-top: 12px; }
-.foot p { margin: 0 0 6px; }
+.pickrow { display: flex; gap: 8px; align-items: stretch; }
+.pickrow .pick { flex: 1; }
+.pickrow input[type=checkbox] { width: 18px; margin: 0; flex: none; accent-color: var(--ink); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0; }
+.chip { font-size: 12px; border: 1px solid var(--ring); border-radius: 999px; padding: 3px 4px 3px 9px;
+        background: var(--control); display: inline-flex; align-items: center; gap: 4px; }
+.app .chip button { width: auto; margin: 0; padding: 0 6px; background: none; color: var(--muted); font-size: 13px; }
+.app select, .app textarea, .form input, .form select { font: inherit; font-size: 13px; color: var(--ink);
+        background: var(--control); border: 1px solid var(--ring); border-radius: 8px; padding: 7px 9px; width: 100%; }
+.app textarea { margin-top: 6px; resize: vertical; }
+.sub-box { margin-top: 10px; font-size: 13px; }
+.sub-box > summary { cursor: pointer; color: var(--ink-2); }
+.form label { display: block; font-size: 12px; color: var(--ink-2); margin-top: 6px; }
+.form label.check { display: flex; gap: 6px; align-items: center; }
+.form label.check input { width: auto; }
+.checks { list-style: none; padding: 0; margin: 6px 0 0; font-size: 12.5px; }
+.checks li { padding: 3px 0; }
+.checks .ok::before { content: "✓ "; color: #2e7d32; font-weight: 700; }
+.checks .bad::before { content: "✗ "; color: var(--accent); font-weight: 700; }
+.batch { border: 1px solid var(--hairline); border-radius: 8px; padding: 8px 10px; margin-top: 6px; font-size: 13px; }
+.batch > summary { cursor: pointer; }
+.batch .meta { font-size: 12px; color: var(--muted); }
+.batch table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 12px; }
+.batch td { padding: 3px 4px 3px 0; border-top: 1px solid var(--hairline); vertical-align: top; }
+.batch .st-done { color: #2e7d32; font-weight: 600; }
+.batch .st-failed, .batch .st-left { color: var(--accent); font-weight: 600; }
+.batch pre { white-space: pre-wrap; font-size: 11px; color: var(--muted); max-height: 140px; overflow: auto; }
+body:not(.is-app) .app-only { display: none; }
+.tools { border-top: 1px solid var(--hairline); padding-top: 14px; }
+.tools .sub-box { border: 1px solid var(--hairline); border-radius: 8px; padding: 8px 10px; margin-top: 8px; }
+.tools .sub-box > summary { font-weight: 600; color: var(--ink); }
+.tools .sub-box[open] > summary { margin-bottom: 6px; }
+.sources { width: 100%; border-collapse: collapse; font-size: 12px; }
+.sources td { padding: 5px 0; border-top: 1px solid var(--hairline); vertical-align: top; }
+.sources tr:first-child td { border-top: 0; }
+.sources .layer { font-weight: 600; color: var(--ink); }
+.sources .what { color: var(--ink-2); }
+.sources a { color: var(--ink-2); text-underline-offset: 2px; }
 /* popup + tooltip */
 .leaflet-popup-content-wrapper, .leaflet-tooltip { font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
 .pop h3 { margin: 0 0 6px; font-size: 14px; }
@@ -156,10 +180,6 @@ select {
         </div>
       </div>
       <p class="explain" id="manage-note"></p>
-      <details id="trash-box" hidden>
-        <summary id="trash-sum">Deleted fires</summary>
-        <div id="trash"></div>
-      </details>
     </div>
   </div>
 
@@ -175,14 +195,20 @@ select {
     </form>
     <div class="picks" id="run-pick"></div>
     <div class="app"><button type="button" id="run-go" hidden>Run assessment</button></div>
-    <p class="explain" id="run-status">Fetches the perimeter, elevation, soils and Sentinel-2
-      burn severity, then runs the USGS models. About 1 to 10 minutes.</p>
+    <p class="explain" id="run-status"></p>
+    <div id="sel-bar" hidden>
+      <p class="label">Selected for a batch</p>
+      <div id="sel-list" class="chips"></div>
+      <div class="row2">
+        <select id="sel-where" aria-label="Where to run"></select>
+        <button type="button" id="sel-run">Run selected</button>
+      </div>
+    </div>
   </div>
 
   <div>
     <p class="label"><label for="layer">Show</label></p>
     <select id="layer"></select>
-    <p class="explain" id="explain"></p>
     <div id="storm-ctl" hidden>
       <div class="storm-head"><label for="storm">Storm, 15-minute intensity</label>
         <span><b id="storm-val">24</b> mm/h</span></div>
@@ -197,11 +223,6 @@ select {
 
   <div class="legend" id="legend"></div>
 
-  <details class="formula" id="formula-box" open>
-    <summary>How it's calculated</summary>
-    <div id="formula"></div>
-  </details>
-
   <div class="toggles">
     <p class="label">Background</p>
     <label><input type="checkbox" id="t-sev" checked> Burn severity (<span id="sev-src">BAER</span>)</label>
@@ -209,15 +230,92 @@ select {
     <label><input type="checkbox" id="t-osm"> Online street map (needs internet)</label>
   </div>
 
-  <div id="export-panel" hidden>
-    <p class="label">Download this fire</p>
-    <div class="exports" id="exports"></div>
-    <p class="explain">Stream segments with M1 thresholds and likelihood, volume and hazard at
-      USGS's design storms; the geodatabase and shapefiles add basins, outlets and the
-      perimeter.</p>
-  </div>
+  <section class="app tools app-only" id="config">
+    <p class="label">Configuration</p>
+    <details class="sub-box app-only" id="settings-box">
+      <summary>Settings: HPC cluster</summary>
+    <p class="explain">For running batches on your own cluster account (Slurm). The code must be
+      installed there first (this repository with its .venv). Passwords go to your system's
+      password store (Windows Credential Manager, macOS Keychain, or the keyring on Linux), never
+      to a file; with an SSH key, leave the password empty.</p>
+    <form id="hpc-form" class="form">
+      <label>Name <input name="name" placeholder="e.g. Lemhi"></label>
+      <div class="row2">
+        <label>Host <input name="host" placeholder="lemhi.c3plus3.org" required></label>
+        <label>User <input name="user" placeholder="your cluster user name" required></label>
+      </div>
+      <div class="row2">
+        <label>Jump host (optional) <input name="jump_host" placeholder="login gateway"></label>
+        <label>Jump user <input name="jump_user" placeholder="same as user"></label>
+      </div>
+      <label>Folder on the cluster <input name="remote_dir" placeholder="~/scratch/dfh-staging" required></label>
+      <label>Setup command <input name="setup" placeholder="source .venv/bin/activate"></label>
+      <div class="row2">
+        <label>Login with <select name="auth"><option value="key">SSH key</option><option value="password">Password</option></select></label>
+        <label>Key file (optional) <input name="key_path" placeholder="default keys"></label>
+      </div>
+      <div class="row2">
+        <label>Partition <input name="partition" placeholder="tiny"></label>
+        <label>Max running jobs <input name="max_running" type="number" min="1" max="500"></label>
+      </div>
+      <label class="check"><input type="checkbox" name="staged"> Compute nodes have no internet (download on the login node)</label>
+      <button type="submit">Save settings</button>
+    </form>
+    <div class="form" id="hpc-pw-box">
+      <label><span id="hpc-pw-label">Password</span> <input type="password" id="hpc-pw" autocomplete="new-password" placeholder="stored in your system password store"></label>
+      <div class="row2">
+        <button type="button" id="hpc-pw-save">Save password</button>
+        <button type="button" id="hpc-pw-clear" class="quiet">Remove password</button>
+      </div>
+    </div>
+    <div class="form" id="hpc-jpw-box" hidden>
+      <label><span id="hpc-jpw-label">Jump host password</span> <input type="password" id="hpc-jpw" autocomplete="new-password" placeholder="stored in your system password store"></label>
+      <div class="row2">
+        <button type="button" id="hpc-jpw-save">Save jump password</button>
+        <button type="button" id="hpc-jpw-clear" class="quiet">Remove jump password</button>
+      </div>
+      <p class="explain">Only if the jump host asks for a password different from the cluster's.</p>
+    </div>
+    <button type="button" id="hpc-test" class="quiet">Test connection</button>
+    <p class="explain" id="hpc-note"></p>
+    <ul id="hpc-checks" class="checks"></ul>
+    </details>
+    <details class="sub-box app-only" id="list-box">
+      <summary>Run a list of fires</summary>
+      <textarea id="list-text" rows="5" placeholder="One per line: a fire ID (2025-IDPAF-005844) or name,year,state (Rush,2025,ID)"></textarea>
+      <div class="row2">
+        <select id="list-where" aria-label="Where to run"></select>
+        <button type="button" id="list-run">Run list</button>
+      </div>
+      <p class="explain" id="list-status"></p>
+    </details>
+  </section>
 
-  <div class="foot" id="foot"></div>
+  <section class="app tools" id="logs">
+    <p class="label">Logs</p>
+    <details class="sub-box app-only" id="batch-box">
+      <summary id="batch-sum">Batches</summary>
+      <select id="batch-select" aria-label="Batch" hidden></select>
+      <div id="batch-detail"><p class="explain">No batches yet. Tick fires in Add a fire, or run a list.</p></div>
+    </details>
+    <details class="sub-box" id="sources-box">
+      <summary>Input data for this fire</summary>
+      <div id="sources"></div>
+    </details>
+    <details class="sub-box app-only" id="trash-box">
+      <summary id="trash-sum">Deleted fires</summary>
+      <div id="trash"></div>
+    </details>
+  </section>
+
+  <section class="app tools app-only" id="exports-sec">
+    <p class="label">Exports</p>
+    <details class="sub-box app-only" id="export-box">
+      <summary>Download this fire</summary>
+      <div class="exports" id="exports"></div>
+    </details>
+  </section>
+
 </aside>
 <div id="map" role="region" aria-label="Hazard map"></div>
 
@@ -261,8 +359,6 @@ const VIEWS = {
     label: "Likelihood (drag the storm)", storm: true,
     get name() { return `Likelihood at ${STORM.i} mm/h (USGS M1)`; },
     value: stormP, upperInclusive: true, unit: "",
-    explain: "Pick a storm and see where it would trigger debris flows. A stream at 50% or " +
-             "more is one whose rainfall threshold this storm meets or exceeds.",
     bins: [[-Infinity, 0.2, "20% or less"], [0.2, 0.4, "20 to 40%"], [0.4, 0.6, "40 to 60%"],
            [0.6, 0.8, "60 to 80%"], [0.8, Infinity, "over 80%"]],
     colors: [0, 1, 2, 4, 5],
@@ -272,19 +368,16 @@ const VIEWS = {
   m1: {
     name: "Rainfall threshold: USGS M1",
     field: "I15_50", unit: "mm/h",
-    explain: "15-minute rainfall intensity at which a debris flow becomes 50% likely. " +
-             "Lower means less rain is needed, so darker streams are more dangerous.",
-    bins: [[55, Infinity, "55 mm/h or more"], [40, 55, "40 to 55"], [30, 40, "30 to 40"],
-           [25, 30, "25 to 30"], [20, 25, "20 to 25"], [-Infinity, 20, "under 20 mm/h"]],
-    colors: [0, 1, 2, 3, 4, 5], noneLabel: "No threshold (no soil data)",
+    // classes from this fire's own thresholds (m1Classes), so the legend fits every fire
+    get bins() { return groups[fire.key].m1.bins; },
+    get colors() { return groups[fire.key].m1.colors; },
+    noneLabel: "No threshold (no soil data)",
     fmt: v => v.toFixed(1),
   },
   hazard: {
     label: "Combined hazard (drag the storm)", storm: true,
     get name() { return `Combined hazard at ${STORM.i} mm/h`; },
     value: (p, idx) => { const h = stormHazard(p, idx); return h && h.cls; }, unit: "",
-    explain: "USGS combined class (Cannon 2010): a likelihood score plus a volume score, " +
-             "both at the storm on the slider. Click a stream to see its two scores.",
     bins: [[-Infinity, 1.5, "Low · total score 3 or less"], [1.5, 2.5, "Moderate · total 4 to 6"],
            [2.5, Infinity, "High · total 7 or more"]],
     colors: [0, 3, 5],
@@ -295,8 +388,6 @@ const VIEWS = {
     label: "Potential volume (drag the storm)", storm: true,
     get name() { return `Potential volume at ${STORM.i} mm/h`; },
     value: stormV, unit: "m³", upperInclusive: true,
-    explain: "Estimated sediment volume if a debris flow happens (Gartner 2014). At Grizzly " +
-             "Creek this model overestimated measured volumes about 6×; read it as relative size.",
     bins: [[-Infinity, 1e3, "1,000 m³ or less · hazard score 1"], [1e3, 1e4, "1,000 to 10,000 · score 2"],
            [1e4, 1e5, "10,000 to 100,000 · score 3"], [1e5, Infinity, "over 100,000 m³ · score 4"]],
     colors: [0, 2, 3, 5], noneLabel: "No estimate",
@@ -321,6 +412,21 @@ const osm = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
 let fire = FIRES[0], view = "storm", groups = {}, openLine = null;
 
 const valueOf = (props, idx, spec) => spec.value ? spec.value(props, idx) : props[idx[spec.field]];
+
+// M1 threshold classes for one fire: breaks at the sixths of its streams' thresholds,
+// rounded to whole mm/h (duplicates dropped), highest threshold (least hazardous) first.
+const M1_FALLBACK = [55, 40, 30, 25, 20];
+function m1Classes(values) {
+  const v = values.filter(x => x !== null && x !== undefined).sort((a, b) => a - b);
+  const q = k => v[Math.min(v.length - 1, Math.floor(k * v.length))];
+  let breaks = v.length >= 12 ? [5, 4, 3, 2, 1].map(k => Math.round(q(k / 6))) : M1_FALLBACK;
+  breaks = breaks.filter((b, i) => i === 0 || b < breaks[i - 1]);       // strictly falling
+  const bins = [[breaks[0], Infinity, `${breaks[0]} mm/h or more`]];
+  for (let i = 1; i < breaks.length; i++) bins.push([breaks[i], breaks[i - 1], `${breaks[i]} to ${breaks[i - 1]}`]);
+  bins.push([-Infinity, breaks[breaks.length - 1], `under ${breaks[breaks.length - 1]} mm/h`]);
+  const n = bins.length;
+  return { bins, colors: bins.map((_, i) => Math.round(i * 5 / (n - 1))), quantiles: v.length >= 12 };
+}
 
 function binOf(v, spec) {
   if (v === null || v === undefined) return -1;
@@ -351,7 +457,8 @@ function buildFire(f) {
   const hs = L.imageOverlay(f.hillshade.uri, f.hillshade.bounds, { opacity: 1, pane: "terrain" });
   const sev = L.imageOverlay(f.severity.uri, f.severity.bounds, { opacity: 1, pane: "severity" });
   const per = L.geoJSON(f.perimeter, { style: { color: "#3a3936", weight: 1.6, dashArray: "5 4", fill: false }, interactive: false });
-  return { idx, casing, lines, items, hs, sev, per };
+  const m1 = m1Classes(f.segments.props.map(p => p[idx.I15_50]));
+  return { idx, casing, lines, items, hs, sev, per, m1 };
 }
 
 function style() {
@@ -383,7 +490,7 @@ function restyleStorm() {
 }
 
 function panel() {
-  legend(); tiles(); formula();
+  legend(); tiles();
   const spec = VIEWS[view];
   document.getElementById("storm-ctl").hidden = !spec.storm;
   if (spec.storm) {
@@ -425,55 +532,18 @@ function popup(p, idx) {
     row("Soil erodibility (S)", g("Soil_M1") === null ? "no data" : g("Soil_M1").toFixed(2)) +
     row("Burned mod./high area", g("Bmh_km2") === null ? "–" : g("Bmh_km2").toFixed(2) + " km²") +
     row("Relief", g("Relief_m") === null ? "–" : Math.round(g("Relief_m")) + " m") +
-    `</table>${why}<p class="note">Thresholds are for the first year after the fire. ` +
-    `Volume estimates run high (~6× measured at Grizzly Creek). Formulas: side panel.</p></div>`;
+    `</table>${why}</div>`;
 }
-
-const M1_DEF = `<p><b>T</b> = share of the basin that is moderately/highly burned <i>and</i> steeper than 23°.
-  <b>F</b> = mean dNBR ÷ 1000. <b>S</b> = mean soil erodibility (KF).</p>`;
-const SCORE_TABLE = `<table>
-  <tr><th>Likelihood</th><th>Score</th><th>Volume (m³)</th><th>Score</th></tr>
-  <tr><td>≤ 20%</td><td>1</td><td>≤ 1,000</td><td>1</td></tr>
-  <tr><td>20–40%</td><td>2</td><td>1,000–10,000</td><td>2</td></tr>
-  <tr><td>40–60%</td><td>3</td><td>10,000–100,000</td><td>3</td></tr>
-  <tr><td>60–80%</td><td>4</td><td>&gt; 100,000</td><td>4</td></tr>
-  <tr><td>&gt; 80%</td><td>5</td><td></td><td></td></tr></table>
-  <p>Total = likelihood score + volume score: <b>≤ 3 Low, 4–6 Moderate, ≥ 7 High</b>.</p>`;
-const FORMULAS = {
-  m1: () => `<p>Likelihood (logistic model), for a 15-minute storm:</p>
-    <div class="eq">logit(p) = B + (C<sub>T</sub>·T + C<sub>F</sub>·F + C<sub>S</sub>·S) · R</div>
-    <p>R = 15-minute rain total in mm (intensity × 0.25 h). B = −3.63, C<sub>T</sub> = 0.41,
-       C<sub>F</sub> = 0.67, C<sub>S</sub> = 0.70.</p>
-    <p>Threshold = the rain that makes p = 50% (logit = 0):</p>
-    <div class="eq">R<sub>50</sub> = 3.63 / (0.41·T + 0.67·F + 0.70·S)<br>I<sub>15</sub> = R<sub>50</sub> / 0.25 h</div>
-    ${M1_DEF}<p class="src">Staley et al. 2017 (M1), as implemented in pfdf/wildcat.</p>`,
-  volume: () => `<p>Emergency volume model, for the storm on the slider:</p>
-    <div class="eq">ln V = 4.22 + 0.39·√${STORM.i}<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;+ 0.36·ln(B<sub>mh</sub>) + 0.13·√Relief</div>
-    <p>B<sub>mh</sub> = basin area burned at moderate/high severity (km²);
-       Relief = highest minus lowest point (m). 95% range: ln V ± 1.96 × 1.04, i.e. V ÷ or × 7.7.
-       Volume does not use the likelihood model: it is the size of a flow <i>if</i> one happens.</p>
-    <p>Its hazard score (1–4) feeds the combined hazard class:</p>${SCORE_TABLE}
-    <p class="src">Gartner et al. 2014 (emergency model). Overestimated measured volumes ~6× at Grizzly Creek.</p>`,
-  hazard: () => `<p>Not a separate model: a points system combining the M1 likelihood and the
-    volume, both at ${STORM.i} mm/h.</p>
-    ${SCORE_TABLE}<p class="src">Cannon et al. 2010, with USGS's likelihood breaks
-    (20/40/60/80%) as configured in wildcat. Click a stream to see its scores.</p>`,
-};
-
-FORMULAS.storm = () => `<p>USGS M1 likelihood for the storm on the slider (R = intensity × 0.25 h):</p>
-  <div class="eq">x = −3.63<br>&nbsp;&nbsp;+ (0.41·T + 0.67·F + 0.70·S) · ${STORM.i} × 0.25<br>p = 1 / (1 + e<sup>−x</sup>)</div>
-  <p>p = 50% exactly when the storm equals the stream's M1 threshold.</p>${M1_DEF}
-  <p>Its hazard score (1–5) feeds the combined hazard class:</p>${SCORE_TABLE}
-  <p class="src">Staley et al. 2017 (M1).</p>`;
-
-function formula() { document.getElementById("formula").innerHTML = FORMULAS[view](); }
 
 function legend() {
   const spec = VIEWS[view];
   const rows = spec.bins.map((b, i) => [RAMP[spec.colors[i]], b[2]]).reverse();
-  const hazardFirst = view === "m1";
-  const cap = hazardFirst ? "Darker = less rain needed"
-            : view === "storm" ? "Darker = more likely at this storm" : "Darker = more hazardous";
+  const m1 = view === "m1" && groups[fire.key].m1, s = fire.stats;
+  const cap = m1 ? (m1.quantiles
+      ? `Darker = less rain needed. Each class holds about a sixth of this fire's ` +
+        `${(s.n - s.no_m1).toLocaleString()} streams with a threshold; median ${s.m1_median.toFixed(1)} mm/h.`
+      : "Darker = less rain needed")
+    : view === "storm" ? "Darker = more likely at this storm" : "Darker = more hazardous";
   document.getElementById("legend").innerHTML =
     `<p class="label">${spec.name}</p><div class="cap">${cap}</div>` +
     rows.map(([c, t]) => `<div class="row"><span class="sw" style="background:${c}"></span>${t}</div>`).join("") +
@@ -506,10 +576,15 @@ function tiles() {
   const inTop = vals.filter(v => binOf(v, spec) === top).length;
   const pct = vals.length ? Math.round(100 * inTop / vals.length) : 0;
   const likely = vals.filter(v => v >= 0.5).length;
+  const met = vals.filter(v => v <= 24).length;     // m1 view: thresholds USGS's 24 mm/h design storm reaches
   const last = view === "storm"
     ? `<div class="tile"><div class="k">Likely debris flows (50%+)</div>
          <div class="v">${likely.toLocaleString()}</div>
          <div class="n">${vals.length ? Math.round(100 * likely / vals.length) : 0}% of ${vals.length.toLocaleString()} streams</div></div>`
+    : view === "m1"
+    ? `<div class="tile"><div class="k">Threshold 24 mm/h or less</div>
+         <div class="v">${vals.length ? Math.round(100 * met / vals.length) : 0}<small>%</small></div>
+         <div class="n">${met.toLocaleString()} of ${vals.length.toLocaleString()} streams; USGS design storm</div></div>`
     : `<div class="tile"><div class="k">In the darkest class</div>
          <div class="v">${pct}<small>%</small></div>
          <div class="n">${spec.bins[top][2]}</div></div>`;
@@ -528,14 +603,6 @@ function tiles() {
     ${last}`;
 }
 
-function footer() {
-  document.getElementById("foot").innerHTML =
-    `<p><b>${fire.name} Fire, ${fire.year} (${fire.state}).</b>${fire.unique_id ? ` Fire ID ${fire.unique_id}.` : ""} ` +
-    `Inputs: ${fire.inputs}.</p>` +
-    `<p>Models: USGS M1 likelihood (Staley et al. 2017), Gartner et al. 2014 volume, ` +
-    `Cannon et al. 2010 combined hazard, via wildcat/pfdf.</p>` +
-    `<p>Research prototype. Not an official USGS product and not for operational decisions.</p>`;
-}
 
 // In the app FIRES holds summaries; a fire's layers are fetched the first time it is shown
 async function loadFire(f) {
@@ -566,8 +633,25 @@ async function showFire(key) {
   if (APP) document.getElementById("exports").innerHTML =
     [["geojson", "GeoJSON"], ["csv", "CSV table"], ["shp", "Shapefiles"], ["gdb", "File geodatabase"]]
       .map(([f, t]) => `<a href="api/fires/${encodeURIComponent(fire.key)}/export?format=${f}">${t}</a>`).join("");
-  footer(); style();
+  renderSources(); style();
   if (APP) renderManage();
+}
+
+// Text from WFIGS, the cluster or the user goes into HTML through esc()
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+// Where each input of the current fire came from (map/build_map.py input_services)
+function renderSources() {
+  const rows = fire.services || [];
+  document.getElementById("sources").innerHTML = rows.length
+    ? `<table class="sources">${rows.map(r => `<tr><td>
+        <div class="layer">${esc(r.layer)}</div>
+        <div class="what">${esc(r.source)}</div>
+        ${r.service ? `<div>${r.url && /^https:\/\//.test(r.url)
+          ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.service)}</a>` : esc(r.service)}</div>` : ""}
+      </td></tr>`).join("")}</table>`
+    : `<p class="explain">${esc(fire.inputs || "Not recorded for this fire.")}</p>`;
 }
 
 // App only: keep (protect from deletion) and delete (to "Deleted fires", restorable)
@@ -609,10 +693,9 @@ async function refreshFires() {
 }
 async function renderTrash() {
   const list = await (await fetch("api/trash")).json();
-  const box = document.getElementById("trash-box");
-  box.hidden = !list.length;
   document.getElementById("trash-sum").textContent = `Deleted fires (${list.length})`;
-  document.getElementById("trash").innerHTML = list.map(t => `<div class="trash-row">
+  document.getElementById("trash").innerHTML = list.length ? "" : `<p class="explain">No deleted fires.</p>`;
+  document.getElementById("trash").innerHTML += list.map(t => `<div class="trash-row">
       <b>${t.name} ${t.year}</b> <span class="where">${t.state} · ${mb(t.bytes)} · deleted ${new Date(t.deleted * 1000).toLocaleString()}</span>
       <div class="row2"><button type="button" data-restore="${t.id}">Restore</button>
         <button type="button" class="quiet" data-purge="${t.id}">Delete permanently</button></div></div>`).join("");
@@ -650,7 +733,8 @@ if (APP) {
       renderFireSwitch(); await renderTrash();
       if (FIRES.length) await showFire(FIRES[0].key);
       else fire = null;
-      renderManage(`${gone.name} ${gone.year} moved to Deleted fires (${mb(r.bytes)}); restore it below.`);
+      renderManage(`${gone.name} ${gone.year} moved to Deleted fires (${mb(r.bytes)}); restore it under ` +
+                   "Logs > Deleted fires.");
     } catch (err) { renderManage(err.message); }
   });
   renderTrash();
@@ -686,7 +770,7 @@ renderFireSwitch();
 // App only: run the pipeline for a new fire, follow it, then add it to the list and show it
 if (APP) {
   document.getElementById("run-panel").hidden = false;
-  document.getElementById("export-panel").hidden = false;
+  document.body.classList.add("is-app");        // shows the app-only sections and boxes
   const year = document.getElementById("run-year");
   year.max = new Date().getFullYear(); year.value = year.max;
   const status = document.getElementById("run-status"), go = document.getElementById("run-go");
@@ -694,6 +778,7 @@ if (APP) {
   const $ = id => document.getElementById(id), pick = $("run-pick");
   const UID = /^\d{4}-[A-Za-z]{2}[A-Za-z0-9]{2,6}-[A-Za-z0-9]{1,10}$/;
   let cards = [], chosen = null;
+  const selected = new Map();      // Unique Fire ID -> label, kept across searches
 
   // 1. Find: WFIGS candidates for a name and year (and state), or one Unique Fire ID
   $("run-form").addEventListener("submit", async e => {
@@ -707,11 +792,20 @@ if (APP) {
     cards = body.candidates;
     if (!cards.length) return say(`No fire matches ${UID.test(raw) ? raw : `"${raw}" in ${year.value}`}. ` +
                                   "Check the spelling and year (WFIGS names, e.g. \"Big Bear\").", true);
-    pick.innerHTML = cards.map((c, i) => `<button type="button" class="pick" data-i="${i}" aria-pressed="false">
-        <b>${c.name}</b>${c.on_map ? '<span class="badge">on map</span>' : ""}
-        <div class="where">${c.county ? c.county + " County, " : ""}${c.state} · ${c.acres.toLocaleString()} acres</div>
-        <div class="uid">${c.unique_id} · found ${c.discovered}</div></button>`).join("");
+    pick.innerHTML = cards.map((c, i) => `<div class="pickrow">
+        <input type="checkbox" class="sel" data-i="${i}" aria-label="Select ${esc(c.name)} for a batch"
+               ${c.on_map ? "disabled title=\"Already on the map\"" : ""} ${selected.has(c.unique_id) ? "checked" : ""}>
+        <button type="button" class="pick" data-i="${i}" aria-pressed="false">
+        <b>${esc(c.name)}</b>${c.on_map ? '<span class="badge">on map</span>' : ""}
+        <div class="where">${c.county ? esc(c.county) + " County, " : ""}${esc(c.state)} · ${c.acres.toLocaleString()} acres</div>
+        <div class="uid">${esc(c.unique_id)} · found ${esc(c.discovered || "")}</div></button></div>`).join("");
     pick.querySelectorAll(".pick").forEach(b => b.addEventListener("click", () => choose(+b.dataset.i)));
+    pick.querySelectorAll(".sel").forEach(b => b.addEventListener("change", () => {
+      const c = cards[+b.dataset.i];
+      if (b.checked) selected.set(c.unique_id, `${c.name} ${c.year} (${c.state})`);
+      else selected.delete(c.unique_id);
+      renderSelected();
+    }));
     if (cards.length === 1) choose(0);
     else say(`${cards.length}${body.more ? "+" : ""} fires match. Pick one:`);
   });
@@ -750,11 +844,171 @@ if (APP) {
       if (s.fire_key) { chosen.on_map = s.fire_key; go.textContent = "Show on map"; showFire(s.fire_key); }
     }, 2000);
   });
+
+  // 4. Batches: fires ticked in the results (kept across searches), or a pasted list,
+  //    run on this computer or on the HPC cluster from Settings
+  let hpcProfile = null;
+  function renderSelected() {
+    $("sel-bar").hidden = !selected.size;
+    $("sel-list").innerHTML = [...selected].map(([uid, label]) =>
+      `<span class="chip">${esc(label)}<button type="button" data-uid="${esc(uid)}" aria-label="Remove ${esc(label)}">×</button></span>`).join("");
+    $("sel-list").querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
+      selected.delete(b.dataset.uid); renderSelected();
+      pick.querySelectorAll(".sel").forEach(x => { if (cards[+x.dataset.i].unique_id === b.dataset.uid) x.checked = false; });
+    }));
+    $("sel-run").textContent = `Run ${selected.size} selected`;
+  }
+  function renderWhere() {
+    const opts = `<option value="local">On this computer</option>` +
+      (hpcProfile && hpcProfile.configured
+        ? `<option value="hpc">On ${esc(hpcProfile.name || hpcProfile.host)} (HPC)</option>` : "");
+    for (const id of ["sel-where", "list-where"]) { const v = $(id).value; $(id).innerHTML = opts; if (v) $(id).value = v; }
+  }
+  async function startBatch(lines, where, button, note = say) {
+    button.disabled = true;
+    try {
+      const b = await post("api/batches", { lines, where });
+      note(`Batch started ${where === "hpc" ? "on " + (hpcProfile.name || hpcProfile.host) : "on this computer"}: ` +
+          `${b.count} fire${b.count === 1 ? "" : "s"}. Progress under Logs > Batches.`);
+      openBatch = b.name;
+      $("batch-box").open = true;
+      await refreshBatches();
+      return true;
+    } catch (e) { note(e.message, true); return false; }
+    finally { button.disabled = false; }
+  }
+  $("sel-run").addEventListener("click", async () => {
+    if (await startBatch([...selected.keys()], $("sel-where").value, $("sel-run"))) {
+      selected.clear(); renderSelected(); pick.querySelectorAll(".sel").forEach(x => x.checked = false);
+    }
+  });
+  $("list-run").addEventListener("click", async () => {
+    const lines = $("list-text").value.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith("#"));
+    const note = (text, err) => { $("list-status").textContent = text; $("list-status").classList.toggle("err", !!err); };
+    if (!lines.length) return note("Paste at least one fire: an ID, or name,year,state", true);
+    if (await startBatch(lines, $("list-where").value, $("list-run"), note)) $("list-text").value = "";
+  });
+
+  let openBatch = null, batchTimer = null, finishedSeen = new Set();
+  const STATUS_CLASS = s => s.startsWith("done") || s.startsWith("skipped") ? "st-done"
+    : s.startsWith("failed") ? "st-failed" : s === "left out" ? "st-left" : "";
+  // Batches: a dropdown of recent batches; the chosen one's fires, phases, errors and log below
+  const batchCounts = v => {
+    const c = {};
+    v.rows.forEach(r => { const k = r.status === "left out" ? r.status : r.status.split(" ")[0]; c[k] = (c[k] || 0) + 1; });
+    return Object.entries(c).map(([k, n]) => `${n} ${k}`).join(", ");
+  };
+  const batchWhere = v => v.where === "hpc" ? `HPC ${v.cluster || ""}` : "this computer";
+  async function refreshBatches() {
+    const list = await (await fetch("api/batches")).json();
+    const active = list.filter(b => b.state === "starting" || b.state === "running");
+    $("batch-sum").textContent = `Batches (${list.length}${active.length ? `, ${active.length} running` : ""})`;
+    if (!list.length) { clearTimeout(batchTimer); return; }
+    if (!openBatch || !list.some(b => b.name === openBatch)) openBatch = list[0].name;
+    const views = await Promise.all(list.slice(0, 8).map(b => fetch(`api/batches/${b.name}`).then(r => r.json())));
+    const select = $("batch-select");
+    select.hidden = false;
+    select.innerHTML = list.map(b => `<option value="${esc(b.name)}">${esc(b.state)} · ${b.count} fire${b.count === 1 ? "" : "s"} · ` +
+      `${esc(b.where === "hpc" ? b.cluster || "HPC" : "this computer")} · ${new Date(b.created * 1000).toLocaleString()}</option>`).join("");
+    select.value = openBatch;
+    const v = views.find(x => x.name === openBatch) || await (await fetch(`api/batches/${openBatch}`)).json();
+    const rows = v.rows.map(r => `<tr><td>${esc(r.key || r.line)}</td>
+        <td class="${STATUS_CLASS(r.status)}">${esc(r.status)}${r.fetched ? " · copied here" : ""}</td>
+        <td>${Object.entries(r.phases).map(([p, s]) => `${esc(p)}: ${esc(s)}`).join(", ")}${r.error ? `<br>${esc(r.error)}` : ""}</td></tr>`).join("");
+    $("batch-detail").innerHTML = `<div class="batch">
+      <div><b>${esc(v.state)}</b> · ${v.count} fire${v.count === 1 ? "" : "s"} on ${esc(batchWhere(v))}</div>
+      <div class="meta">${new Date(v.created * 1000).toLocaleString()}${v.rows.length ? " · " + batchCounts(v) : ""}
+        ${v.polled ? ` · checked ${new Date(v.polled * 1000).toLocaleTimeString()}` : ""}</div>
+      ${v.error ? `<p class="explain err">${esc(v.error)}</p>` : ""}
+      ${v.where === "hpc" && (v.state === "disconnected" || v.state === "failed") ? `<button type="button" class="quiet" data-reconnect="${esc(v.name)}">Reconnect</button>` : ""}
+      ${rows ? `<table>${rows}</table>` : `<p class="explain">Finding the fires…</p>`}
+      ${v.log ? `<pre>${esc(v.log)}</pre>` : ""}</div>`;
+    $("batch-detail").querySelectorAll("[data-reconnect]").forEach(b => b.addEventListener("click", async () => {
+      try { await post(`api/batches/${b.dataset.reconnect}/reconnect`); refreshBatches(); } catch (e) { say(e.message, true); }
+    }));
+    // fires a batch finished appear on the map without a reload
+    const doneKeys = views.flatMap(x => x.rows.filter(r => r.key && STATUS_CLASS(r.status) === "st-done"
+                                                       && (x.where === "local" || r.fetched)).map(r => r.key));
+    if (doneKeys.some(k => !finishedSeen.has(k))) { doneKeys.forEach(k => finishedSeen.add(k)); await refreshFires(); }
+    clearTimeout(batchTimer);
+    if (active.length) batchTimer = setTimeout(refreshBatches, 5000);
+  }
+  $("batch-select").addEventListener("change", e => { openBatch = e.target.value; refreshBatches(); });
+
+  // Settings: HPC profile, password in the system password store, connection test
+  const form = $("hpc-form");
+  // the form from the saved profile: on load and after Save settings only, so password
+  // buttons never undo unsaved edits in the form
+  function fillSettings(p) {
+    for (const el of form.elements) {
+      if (!el.name || !(el.name in p)) continue;
+      if (el.type === "checkbox") el.checked = !!p[el.name]; else el.value = p[el.name] ?? "";
+    }
+    showProfile(p);
+  }
+  function showProfile(p) {
+    hpcProfile = p;
+    $("hpc-pw-label").textContent = p.user && p.host ? `Password for ${p.user}@${p.host}` : "Password";
+    $("hpc-pw").placeholder = p.has_password ? "saved (type to replace)" : `stored in ${p.password_store}`;
+    $("hpc-jpw-label").textContent = `Password for ${p.jump_user || p.user}@${p.jump_host}`;
+    $("hpc-jpw").placeholder = p.has_jump_password ? "saved (type to replace)" : `stored in ${p.password_store}`;
+    showPasswordBoxes();
+    const jump = p.jump_host ? ` via ${p.jump_user || p.user}@${p.jump_host}` +
+      (p.has_jump_password ? " (password saved)" : "") : "";
+    $("hpc-note").textContent = p.configured ? `Set up: ${p.user}@${p.host}${jump}, ${p.remote_dir}` +
+      (p.auth === "password" ? (p.has_password ? "; password saved" : "; no password saved yet") : "; SSH key") : "Not set up yet.";
+    renderWhere();
+  }
+  // the cluster's password box with password login; the jump host's whenever one is saved in the profile
+  function showPasswordBoxes() {
+    $("hpc-pw-box").hidden = form.elements.auth.value !== "password";
+    $("hpc-jpw-box").hidden = !(hpcProfile && hpcProfile.jump_host);
+  }
+  form.elements.auth.addEventListener("change", showPasswordBoxes);
+  form.addEventListener("submit", async e => {
+    e.preventDefault();
+    const body = {};
+    for (const el of form.elements) if (el.name) body[el.name] = el.type === "checkbox" ? el.checked : el.value;
+    try { fillSettings(await post("api/settings/hpc", body)); $("hpc-note").textContent += " · saved"; }
+    catch (err) { $("hpc-note").textContent = err.message; }
+  });
+  $("hpc-pw-save").addEventListener("click", async () => {
+    const pw = $("hpc-pw").value;
+    if (!pw) return ($("hpc-note").textContent = "Type the password first.");
+    try { showProfile(await post("api/settings/hpc/password", { password: pw })); $("hpc-pw").value = ""; }
+    catch (err) { $("hpc-note").textContent = err.message; }
+  });
+  $("hpc-pw-clear").addEventListener("click", async () => {
+    try { showProfile(await post("api/settings/hpc/password", { clear: true })); }
+    catch (err) { $("hpc-note").textContent = err.message; }
+  });
+  $("hpc-jpw-save").addEventListener("click", async () => {
+    const pw = $("hpc-jpw").value;
+    if (!pw) return ($("hpc-note").textContent = "Type the jump host password first.");
+    try { showProfile(await post("api/settings/hpc/password", { password: pw, which: "jump" })); $("hpc-jpw").value = ""; }
+    catch (err) { $("hpc-note").textContent = err.message; }
+  });
+  $("hpc-jpw-clear").addEventListener("click", async () => {
+    try { showProfile(await post("api/settings/hpc/password", { clear: true, which: "jump" })); }
+    catch (err) { $("hpc-note").textContent = err.message; }
+  });
+  $("hpc-test").addEventListener("click", async () => {
+    $("hpc-test").disabled = true; $("hpc-checks").innerHTML = ""; $("hpc-note").textContent = "Connecting…";
+    try {
+      const r = await post("api/settings/hpc/test");
+      $("hpc-checks").innerHTML = r.checks.map(c => `<li class="${c.ok ? "ok" : "bad"}"><b>${esc(c.check)}</b>: ${esc(c.detail)}</li>`).join("");
+      $("hpc-note").textContent = r.checks.every(c => c.ok) ? "Ready to run batches on this cluster." : "Not ready yet; see below.";
+    } catch (err) { $("hpc-note").textContent = err.message; }
+    finally { $("hpc-test").disabled = false; }
+  });
+
+  fetch("api/settings/hpc").then(r => r.json()).then(fillSettings);
+  renderWhere();
+  refreshBatches();
 }
 const sel = document.getElementById("layer");
 sel.innerHTML = ORDER.map(k => `<option value="${k}">${VIEWS[k].label || VIEWS[k].name}</option>`).join("");
-sel.addEventListener("change", () => { view = sel.value; document.getElementById("explain").textContent = VIEWS[view].explain; style(); });
-document.getElementById("explain").textContent = VIEWS[view].explain;
+sel.addEventListener("change", () => { view = sel.value; style(); });
 const slider = document.getElementById("storm");
 let pending = false;
 slider.addEventListener("input", () => {
