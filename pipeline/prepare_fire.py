@@ -591,7 +591,7 @@ def main():
     # from LANDFIRE. Last resort, none: wildcat then does not mask water and developed
     # land, which matters little on a forest fire.
     config = TEMPLATE_CONFIG.read_text()
-    sources = {"perimeter": "WFIGS final perimeter",
+    sources = {"perimeter": feature["properties"].get("_source", "WFIGS final perimeter"),
                "dem": f"RECOVER 1 m LiDAR averaged to {lidar_res} m" if lidar_res
                else "USGS 10 m DEM", "kf": "STATSGO soils"}
     # A WFIGS perimeter that crosses into Mexico or Canada (Border 6 2026) has no US elevation
@@ -612,7 +612,7 @@ def main():
                             schema={"geometry": "MultiPolygon" if geom.geom_type == "MultiPolygon"
                                     else "Polygon", "properties": {"name": "str:40"}}) as out:
                 out.write({"geometry": mapping(geom), "properties": {"name": fire["name"]}})
-            sources["perimeter"] = (f"WFIGS final perimeter, clipped to US elevation coverage: "
+            sources["perimeter"] = (f"{sources['perimeter']}, clipped to US elevation coverage: "
                                     f"{removed:.1f} of {removed + geom.area / 1e6:.1f} km2 removed")
             print(f"perimeter : clipped to the DEM's coverage, {removed:.1f} km2 removed "
                   f"(outside the US); {geom.area / 1e6:.1f} km2 modeled")

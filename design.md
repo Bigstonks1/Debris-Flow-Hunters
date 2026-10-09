@@ -206,9 +206,19 @@ per line), typed into a file or built in the app (3.8).
         16 GB; a 10 m fire peaks at ~2.4 GB), at most `--max-running` at once, each task with
         a private numba cache. Not a node per fire: a 10 m fire would leave most of a 40-core,
         192 GB node idle, and Slurm packs several tasks per node.
-     3. **finish** on the login node once the array is done (`batch.py finish <batch>`, or
-        `--wait` to poll the queue and do it automatically): `--phase usgs` for every fire
-        whose wildcat phase finished, then the summary.
+     3. **USGS comparison** on the login node, `--phase usgs`, one fire at a time.
+        - With `--wait` (the app always uses it): every 30 s while the array runs, each fire
+          whose model has finished is compared straight away. So it is done, and the app
+          copies it back, without waiting for the slowest fire. A fire that finishes while a
+          comparison runs waits its turn.
+        - When the array is gone, a last pass catches any remaining fire and writes the
+          summary (`batch.py finish <batch>` does the same by hand, without `--wait`).
+        - Tested 2026-10-08 with stand-ins for `sbatch` and `squeue` (Wood, Ranch, Boise
+          2024–2025):
+          - Wood's model ended at 00:24:48 and it was compared at 00:24:56, while the other
+            two still ran.
+          - Ranch, compared at 00:25:28, and Boise, at 00:25:30 after Ranch's, followed.
+          - All three done, summary written.
 
      `--compute-internet` instead runs each whole fire inside the array, with a summary job
      after it, for clusters whose compute nodes can download. 1 m fires still go through the
@@ -400,7 +410,7 @@ Rules:
 
 | wildcat input | Primary | Fallbacks, in order | Last resort |
 |---|---|---|---|
-| perimeter | WFIGS final perimeter | accepted on the incident size when WFIGS's GIS acres are stale; clipped to US elevation coverage when it crosses a border | – |
+| perimeter | WFIGS final perimeter | if WFIGS is unreachable: the perimeter saved by the fire's last run → RECOVER's latest daily perimeter, if its acreage matches WFIGS's last (4.1) | run stops |
 | dem | USGS 3DEP 1/3 arc-second (10 m), TNM S3 tiles | the same tiles from USGS's 3DEP image service, when S3 is unreachable (current version only) | run stops (optional: RECOVER 1 m LiDAR, `--lidar-res`) |
 | dnbr | USGS-published inputs (BAER team or EROS BARC) | Sentinel-2 single dates → Sentinel-2 composite → Landsat 8/9 single dates → Landsat 8/9 composite | run stops |
 | severity | USGS-published soil burn severity | Forest Service BAER soil burn severity map (image service) | estimated by wildcat from dNBR (125/250/500) |
@@ -431,6 +441,31 @@ input_services()`).
     acreage check exists to guard against exactly that ambiguity.
   - Border 6 now passes (+3.6% against its 2,525 ac). Rush, whose acreage is current, is
     unchanged.
+- **Fallback 1, the perimeter saved by the fire's last run** (`recover.py`), when WFIGS
+  cannot be reached.
+  - **Why:** it is WFIGS's own polygon from that run, so results are identical; it lets a
+    re-run (by config, by `--id`, or in a batch) go ahead during a WFIGS outage. Re-runs by
+    ID use the fire's existing config instead of the WFIGS lookup.
+  - Recorded as "WFIGS final perimeter, saved <date> (WFIGS unreachable)". Dates are not
+    refreshed while WFIGS is down.
+- **Fallback 2, RECOVER's latest daily perimeter** (`recover.recover_snapshot`), when there
+  is no saved perimeter (a fire's first run elsewhere, or after `--cold`).
+  - **Why:** each RECOVER bundle (2022 on) carries the fire's daily perimeters, copied from
+    WFIGS. On 18 of 19 fires checked the latest one was WFIGS's final perimeter (IoU
+    0.94–1.00).
+  - **Checked before use:** its acreage must be within 5% of the acreage WFIGS last reported,
+    which every normal run records in the config (`wfigs_acres`). A date check alone is not
+    enough: Wood 2024's final perimeter is dated 41 days before its declared containment,
+    while Rush 2025's bundle stopped at 77% of the final area. Without a recorded acreage, a
+    snapshot no more than 30 days before containment is accepted.
+  - The geodatabase (5–25 MB) is copied out of the bundle with HTTP range reads and read
+    locally, avoiding the Windows GDAL exit hang.
+  - Tested 2026-10-08 with WFIGS unreachable (`DFH_WFIGS_DOWN=1`) and `--cold`: Wood, Boise and
+    Eagle Bluff ran on RECOVER's perimeter with results identical to the WFIGS runs (every
+    segment and attribute). Rush was rejected (6,082 acres against WFIGS's 7,908); Woodhead
+    2020 has no bundle; both stop with the reason.
+- **Not a source fallback:** a fire never run before cannot be found while WFIGS is down
+  (the lookup itself is WFIGS); the run stops with that message.
 - **Clipped to US elevation coverage** (`prepare_fire.py`), when the perimeter crosses into
   Mexico or Canada.
   - **Why:** there is no US elevation (or US soil) on the far side, so nothing can be
@@ -689,6 +724,10 @@ the test switches `DFH_DNBR_SENSOR`, `DFH_DNBR_METHOD` and `DFH_DEM_SOURCE`.
 | DEM fallback with a pinned version | Wood 2024 | stops: "version 20240701 is only there" |
 | USGS comparison with the service down | Woodhead 2020 | found `wdh2020` by name in the ScienceBase archive; same 0.845 on 7,900 pairs |
 | Dates refreshed from WFIGS | Wood 2024 (stale copy) | containment 2024-09-15 corrected to 2024-10-16; `dates_locked` left it alone |
+| WFIGS down: saved perimeter (by config, by `--id`, in a batch) | Wood 2024 | identical to the WFIGS run; label not repeated on later runs |
+| WFIGS down, `--cold`: RECOVER perimeter | Wood 2024, Boise 2024, Eagle Bluff 2023 | identical to the WFIGS runs (every segment and attribute) |
+| WFIGS down, `--cold`: stale RECOVER / no bundle / no acreage record | Rush 2025 / Woodhead 2020 / Wood without `wfigs_acres` | each stops with its reason |
+| WFIGS down: a fire never run before | Upper Smith 2026 | stops: "cannot be looked up until WFIGS is back" |
 
 The app, same day, against the staging server:
 - **Fires and map:** all 11 fires load; tiles, the per-fire threshold legend and the

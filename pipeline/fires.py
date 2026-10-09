@@ -11,6 +11,7 @@ lowercased name, which is how the first fires were stored (data/wapiti_..., etc.
 """
 
 import json
+import os
 import re
 import urllib.parse
 import urllib.request
@@ -59,7 +60,14 @@ def fire_key(fire):
     return fire.get("key") or fire["name"].lower()
 
 
+def wfigs_available():
+    """Test switch: DFH_WFIGS_DOWN=1 makes every WFIGS request fail as an outage would."""
+    if os.environ.get("DFH_WFIGS_DOWN"):
+        raise OSError("DFH_WFIGS_DOWN: simulated WFIGS outage")
+
+
 def query(where, geometry=False):
+    wfigs_available()
     params = {"where": where, "outFields": FIELDS, "returnGeometry": str(geometry).lower(),
               "outSR": 4326, "f": "json", "orderByFields": "poly_GISAcres DESC"}
     with urllib.request.urlopen(f"{WFIGS}?{urllib.parse.urlencode(params)}", timeout=120) as r:

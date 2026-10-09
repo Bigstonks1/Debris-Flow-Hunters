@@ -38,7 +38,7 @@ the next one and records which it used.
 
 | Input | First choice | Fallbacks, in order |
 |---|---|---|
-| Fire perimeter | WFIGS interagency perimeter | – |
+| Fire perimeter | WFIGS interagency perimeter | if WFIGS is down: the perimeter saved by the fire's last run → the fire's final daily perimeter from its RECOVER package (checked against WFIGS's last acreage) |
 | Elevation (10 m) | USGS 3DEP tiles (The National Map) | the same tiles from USGS's 3DEP elevation service, if the first is down |
 | Burn imagery (dNBR) | the BAER files USGS published with its own assessment | Sentinel-2, one clear date before and after the fire → Sentinel-2 built from several dates → Landsat 8/9 single dates → Landsat 8/9 built from several dates |
 | Burn severity | the BAER map USGS published | the Forest Service BAER team's map → estimated from the burn imagery |
@@ -167,9 +167,11 @@ python pipeline/batch.py all my_fires.txt --runner slurm --max-running 20   # ma
 Lemhi's compute nodes have no internet, so a cluster batch runs in three stages from the
 login node: it downloads and prepares each fire's inputs there (2 fires at a time, at low
 priority), submits one Slurm job array that runs only the model on the compute nodes (one fire
-per task, 4 cores and 16 GB each, at most `--max-running` at once), and, when the array has
-finished, `python pipeline/batch.py finish <batch>` runs the USGS comparison and writes
-`summary.csv` (or add `--wait` to the run command to have it wait and finish by itself). On a
+per task, 4 cores and 16 GB each, at most `--max-running` at once), and runs the USGS
+comparison back on the login node. With `--wait` (as the app does) each fire is compared as
+soon as its model finishes, so it is ready without waiting for the slowest fire, and
+`summary.csv` is written at the end. Without it, run `python pipeline/batch.py finish
+<batch>` once the array has finished. On a
 cluster whose compute nodes can download, `--compute-internet` runs each whole fire in the
 array instead.
 

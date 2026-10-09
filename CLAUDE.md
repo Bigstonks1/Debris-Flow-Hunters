@@ -38,7 +38,7 @@ DFH_DNBR_SENSOR=landsat DFH_DNBR_METHOD=composite uv run python pipeline/run_fir
 uv run python pipeline/usgs_check.py fires/<key>.json [data/<project>]   # compare with USGS
 uv run python pipeline/batch.py all fires.txt --runner local --workers 3   # many fires on this computer
 python pipeline/batch.py all fires.txt --runner slurm [--wait]   # on Lemhi's login node: inputs here, model on compute nodes
-python pipeline/batch.py finish <batch>                  # after the array: USGS comparison + summary.csv
+python pipeline/batch.py finish <batch>                  # without --wait: remaining USGS comparisons + summary.csv
 uv run python pipeline/split_fire.py all data/<project>  # split: plan, build, run, merge, compare
 uv run python pipeline/run_wildcat.py data/<project> [preprocess|assess|export]   # wildcat by hand
 uv run python map/build_map.py                           # offline map: map/dist/debris_flow_map.html
@@ -107,7 +107,8 @@ exists yet; if you add tests, add the runner to `pyproject.toml` and list it her
 - **Dates are refreshed from WFIGS on every run** (`recover.py`); `"dates_locked": true` in a
   config keeps hand-set dates. Other per-fire downloads stay cached until `--cold`.
 - **Test switches** force fallbacks end to end: `DFH_DEM_SOURCE=service`,
-  `DFH_DNBR_SENSOR=sentinel2|landsat`, `DFH_DNBR_METHOD=single|composite`.
+  `DFH_DNBR_SENSOR=sentinel2|landsat`, `DFH_DNBR_METHOD=single|composite`,
+  `DFH_WFIGS_DOWN=1` (perimeter: saved, then RECOVER; checked against `wfigs_acres`).
 - More traps (DEM projection, nodata labels, WFIGS geometry, Windows GDAL hangs, Soil Data
   Access quirks): `design.md` §9.
 

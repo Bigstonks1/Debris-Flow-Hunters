@@ -248,10 +248,19 @@ def run_slurm(name, max_running=20, force=False, fetch_workers=2, wait=False, co
                                                             "max_running": max_running}))
     print(f"batch {name}: {len(ready)} fires submitted as array job {array} ({max_running} at once)."
           f"\n  When it finishes: python pipeline/batch.py finish {name}")
-    if wait:     # 3: poll the queue, then finish here
-        while queued(array):
-            time.sleep(60)
+    if wait:     # 3: while the array runs, compare each fire with USGS as soon as its model is
+                 # done, so it is finished (and the app can copy it back) without waiting for the
+                 # slowest fire; then a last pass and the summary
+        while True:
+            running = queued(array)
+            compare_ready(name)
+            if not running:
+                break
+            time.sleep(WAIT_POLL_S)
         finish(name)
+
+
+WAIT_POLL_S = 30          # how often --wait checks the queue and finished fires
 
 
 def queued(job):
@@ -259,16 +268,25 @@ def queued(job):
     return bool(r.stdout.strip())
 
 
-def finish(name):
-    """After the array: the USGS comparison for every fire whose wildcat phase is done (it
-    downloads USGS's assessment, so it runs on this node), then the summary."""
-    fires = fires_of(name)
-    todo = [r for r in fires
+def compare_ready(name):
+    """The USGS comparison for every fire whose wildcat phase is done and whose comparison is
+    not, one at a time, in list order (it downloads USGS's assessment, so it runs on this
+    node). Fires whose model finishes meanwhile are picked up on the next call. Returns how
+    many it ran."""
+    todo = [r for r in fires_of(name)
             if load_status(name, r["key"]).get("phases", {}).get("wildcat", {}).get("status") == "done"
             and load_status(name, r["key"]).get("phases", {}).get("usgs", {}).get("status") != "done"]
-    print(f"batch {name}: USGS comparison for {len(todo)} fires", flush=True)
     for r in todo:
+        print(f"batch {name}: {r['key']} model done; USGS comparison", flush=True)
         task(name, r["index"], phase="usgs")
+    return len(todo)
+
+
+def finish(name):
+    """After the array: the USGS comparison for any fire still without one (all of them when
+    the batch did not --wait), then the summary."""
+    fires = fires_of(name)
+    print(f"batch {name}: USGS comparison for {compare_ready(name)} remaining fires", flush=True)
     pending = [r["key"] for r in fires if load_status(name, r["key"]).get("status") in ("inputs done", None)]
     if pending:
         print(f"batch {name}: not finished on the cluster yet (or not submitted): {', '.join(pending)}")

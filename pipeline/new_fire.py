@@ -28,8 +28,19 @@ RECOVER_MEMBERS = ["TopographyElevation_WesternUS_be.tif", "TopographyElevation_
 
 
 def ensure_config(name=None, year=None, state=None, uid=None):
-    """Path of the fire's config, writing it first if the fire is new."""
-    found = lookup(name, year, state, uid, geometry=True)
+    """Path of the fire's config, writing it first if the fire is new. With WFIGS
+    unreachable, a fire already configured (by Unique Fire ID) still runs from its config;
+    pipeline/recover.py then falls back to a saved or RECOVER perimeter."""
+    try:
+        found = lookup(name, year, state, uid, geometry=True)
+    except (OSError, RuntimeError) as e:
+        existing = find_config(uid.upper()) if uid else None
+        if not existing:
+            what = uid or f"{name} {year}"
+            raise SystemExit(f"WFIGS unreachable ({e}); {what} has not been run here before, so it "
+                             "cannot be looked up until WFIGS is back") from None
+        print(f"WFIGS unreachable ({e}); using the existing config {existing}")
+        return existing
     if len(found) != 1:
         listing = "".join(f"\n  {c['unique_id']}  {c['name']}, {c['county']} County, "
                           f"{c['state']}, {c['acres']:,} acres"
