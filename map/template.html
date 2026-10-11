@@ -43,12 +43,20 @@ body {
   background: var(--page); color: var(--ink);
   font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
   display: grid; grid-template-columns: 360px 1fr; height: 100vh;
+  /* Named areas, not auto-placement: browser extensions (e.g. BetterCanvas) add elements
+     to <body>, which would otherwise take the sidebar's cell and push the map off screen */
+  grid-template-rows: minmax(0, 1fr); grid-template-areas: "side map";
 }
+aside { grid-area: side; }
+#map { grid-area: map; }
 aside {
   background: var(--panel); border-right: 1px solid var(--hairline);
   overflow-y: auto; padding: 20px 20px 28px; display: flex; flex-direction: column; gap: 18px;
 }
 #map { height: 100%; background: #e9e8e4; }
+#map-loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 1000;
+               background: var(--panel); color: var(--ink); border: 1px solid var(--hairline);
+               border-radius: 8px; padding: 10px 16px; font-weight: 600; pointer-events: none; }
 h1 { font-size: 18px; line-height: 1.25; margin: 0; letter-spacing: -0.01em; }
 .sub { color: var(--ink-2); margin: 4px 0 0; font-size: 13px; }
 .label { font-size: 12px; font-weight: 600; color: var(--ink-2); margin: 0 0 6px;
@@ -156,7 +164,7 @@ body:not(.is-app) .app-only { display: none; }
 .pop tr.sep td { border-top: 1px solid #e1e0d9; padding-top: 5px; }
 .pop .note { color: #898781; font-size: 12px; margin-top: 6px; max-width: 260px; }
 @media (max-width: 760px) {
-  body { grid-template-columns: 1fr; grid-template-rows: auto 60vh; height: auto; }
+  body { grid-template-columns: 1fr; grid-template-rows: auto 60vh; grid-template-areas: "side" "map"; height: auto; }
   aside { border-right: 0; border-bottom: 1px solid var(--hairline); padding: 16px; }
   #map { height: 60vh; }
 }
@@ -612,15 +620,27 @@ async function loadFire(f) {
   Object.assign(f, await r.json());
 }
 
+// Message over the map while a fire downloads and draws (a large fire takes seconds)
+const mapLoading = document.createElement("div");
+mapLoading.id = "map-loading"; mapLoading.hidden = true;
+map.getContainer().appendChild(mapLoading);
+
 async function showFire(key) {
   const next = FIRES.find(f => f.key === key);
-  if (!next.segments) {
-    fireSwitch.style.opacity = 0.5;
-    try { await loadFire(next); } finally { fireSwitch.style.opacity = 1; }
+  if (!next.segments || !groups[key]) {
+    mapLoading.textContent = `Loading ${next.name} ${next.year}…`;
+    mapLoading.hidden = false;
+    await new Promise(r => requestAnimationFrame(() => setTimeout(r)));   // paint it before drawing
   }
-  if (fire && groups[fire.key]) for (const k of ["casing", "lines", "hs", "sev", "per"]) map.removeLayer(groups[fire.key][k]);
-  fire = next;
-  if (!groups[key]) groups[key] = buildFire(fire);
+  try {
+    if (!next.segments) {
+      fireSwitch.style.opacity = 0.5;
+      try { await loadFire(next); } finally { fireSwitch.style.opacity = 1; }
+    }
+    if (fire && groups[fire.key]) for (const k of ["casing", "lines", "hs", "sev", "per"]) map.removeLayer(groups[fire.key][k]);
+    fire = next;
+    if (!groups[key]) groups[key] = buildFire(fire);
+  } finally { mapLoading.hidden = true; }
   const g = groups[key];
   if (document.getElementById("t-hs").checked) g.hs.addTo(map);
   if (document.getElementById("t-sev").checked) g.sev.addTo(map);
@@ -636,6 +656,11 @@ async function showFire(key) {
   renderSources(); style();
   if (APP) renderManage();
 }
+
+// Keep the fire filling the map when the window (or the phone layout) changes size
+map.on("resize", () => {
+  if (fire && groups[fire.key]) map.fitBounds(groups[fire.key].per.getBounds(), { padding: [20, 20] });
+});
 
 // Text from WFIGS, the cluster or the user goes into HTML through esc()
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>

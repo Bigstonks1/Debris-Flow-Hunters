@@ -31,6 +31,7 @@ BATCHES = ROOT / "data" / "batches"
 lock = threading.Lock()
 procs = {}          # name -> Popen of a local batch started by this app process
 threads = {}        # name -> polling thread of an HPC batch
+on_fetched = None   # set by the server: called with a fire's key once it is copied back
 
 
 def record_path(name):
@@ -127,6 +128,7 @@ def _hpc_loop(name, submit):
             save_record(rec)
         while True:
             s = hpc.load()
+            arrived = []
             with hpc.Connection(s) as c:
                 if not c.exists(f"data/batches/{name}.txt"):
                     raise RuntimeError("this batch never reached the cluster; start it again")
@@ -140,12 +142,20 @@ def _hpc_loop(name, submit):
                         config = next((f["config"] for f in state["fires"] if f.get("key") == key), None)
                         if config and hpc.fetch_fire(c, key, config):
                             rec["fetched"].append(key)
+                            arrived.append(key)
                 if state["finished"]:
                     rec["state"] = "done" if state["exit"] == "0" else "failed"
                     if state["exit"] != "0":
                         rec["error"] = f"the batch on the cluster ended with exit {state['exit']}; " \
                                        "see its log below"
                 save_record(rec)
+            # after the connection closes: a large fire's map takes minutes to build
+            for key in arrived:
+                if on_fetched:
+                    try:
+                        on_fetched(key)
+                    except Exception:       # the map builds on first view instead
+                        traceback.print_exc()
             if rec["state"] in ("done", "failed"):
                 _mark_new_fires_not_kept(rec)
                 save_record(rec)

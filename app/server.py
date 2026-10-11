@@ -65,6 +65,7 @@ NAME_RE = re.compile(r"^[A-Za-z0-9 .'\-]{2,60}$")
 runs, run_lock = {}, threading.Lock()
 export_lock = threading.Lock()     # one export at a time; GDB writes are heavy
 payloads = {}     # key -> (segments mtime, payload)
+payload_locks = {}      # key -> Lock: one build per fire, however many requests wait on it
 
 
 # ---------------------------------------------------------------- fires and map data
@@ -82,18 +83,27 @@ def payload(f):
     exports change; the descriptive fields come from its config on every call, so editing
     fires/*.json (e.g. adding a USGS reference) shows up without rebuilding anything."""
     source = ROOT / f["project"] / "exports" / "segments.shp"
-    stamp = source.stat().st_mtime
-    if f["key"] in payloads and payloads[f["key"]][0] == stamp:
-        data = payloads[f["key"]][1]
-    else:
-        cache = ROOT / f["project"] / "map_payload.json"
-        if cache.exists() and cache.stat().st_mtime >= stamp:
-            data = json.loads(cache.read_text())
+    with payload_locks.setdefault(f["key"], threading.Lock()):
+        stamp = source.stat().st_mtime
+        if f["key"] in payloads and payloads[f["key"]][0] == stamp:
+            data = payloads[f["key"]][1]
         else:
-            data = build_map.fire_payload(f)
-            cache.write_text(json.dumps(data, separators=(",", ":")))
-        payloads[f["key"]] = (stamp, data)
+            cache = ROOT / f["project"] / "map_payload.json"
+            if cache.exists() and cache.stat().st_mtime >= stamp:
+                data = json.loads(cache.read_text())
+            else:
+                data = build_map.fire_payload(f)
+                cache.write_text(json.dumps(data, separators=(",", ":")))
+            payloads[f["key"]] = (stamp, data)
     return {**data, **{k: f[k] for k in META}}
+
+
+def build_payload(key):
+    """Build a fire's map layers as soon as its results arrive (HPC copy-back), so the
+    next page load does not wait minutes for a large fire."""
+    f = fires().get(key)
+    if f:
+        payload(f)
 
 
 def summaries():
@@ -698,6 +708,7 @@ if __name__ == "__main__":
     if args.runner == "slurm":
         # non-POSIX splitting keeps Windows backslashes but also the quotes; drop those
         RUNNER = SlurmRunner([t.strip('"') for t in shlex.split(args.slurm_prefix, posix=False)])
+    batches.on_fetched = build_payload
     batches.resume()        # keep following HPC batches started before a restart
     print(f"Debris-flow hazard app: http://127.0.0.1:{args.port}  runner: {args.runner}"
           f"{f' via {args.slurm_prefix}' if args.slurm_prefix else ''}  (Ctrl+C to stop)")
