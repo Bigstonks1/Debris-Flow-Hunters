@@ -15,9 +15,9 @@ Answer "how does X work" from `design.md` §3 and §6 before searching the code.
 
 A local web app and pipeline that runs the USGS post-fire debris-flow models for any US
 wildfire: name or Unique Fire ID in, mapped and exported stream-segment hazards out,
-validated against USGS's own assessment. Branch `staging` is the pre-production branch:
-only what the app needs. Research scripts (resolution sweeps, scoring against observed
-flows, Graber models, Trail Creek case study) live on `wapiti-e2e`, not here.
+validated against USGS's own assessment. Branch `main` holds only what the app needs, plus `tests/observed/` (the white paper's validation against
+observed debris flows, reproducible end to end). Other research scripts (resolution sweeps,
+Graber models, Trail Creek case study) live on `wapiti-e2e`, not here.
 
 ## Commands
 
@@ -41,13 +41,21 @@ python pipeline/batch.py all fires.txt --runner slurm [--wait]   # on Lemhi's lo
 python pipeline/batch.py finish <batch>                  # without --wait: remaining USGS comparisons + summary.csv
 uv run python pipeline/split_fire.py all data/<project>  # split: plan, build, run, merge, compare
 uv run python pipeline/run_wildcat.py data/<project> [preprocess|assess|export]   # wildcat by hand
+uv run python tests/observed/score_observed.py           # white paper validation (run tests/observed/fires.txt first)
+uvx ruff@0.14.0 check .                                  # lint (CI job 1; settings in pyproject.toml)
+uv run python tests/check_imports.py                     # import every module (CI job 1)
+uv run python tests/check_fire.py tadpole_2020            # a finished fire vs USGS's assessment (CI job 2)
 uv run python map/build_map.py                           # offline map: map/dist/debris_flow_map.html
 sbatch --export=ALL,FIRE_ID=<UID> slurm/run_fire.slurm   # one fire on Slurm
 sbatch --export=ALL,CONFIG=fires/<key>.json,RES=1 slurm/split_prepare.slurm   # 1 m LiDAR as an array
 ```
 
-On Windows without `uv run`: `.venv/Scripts/python.exe`. No test, lint or build tooling
+On Windows without `uv run`: `.venv/Scripts/python.exe`. No unit-test, lint or build tooling
 exists yet; if you add tests, add the runner to `pyproject.toml` and list it here.
+`tests/observed/` is an end-to-end reproduction (about 30 min): rerun it after any change
+that can move a result, and explain any number that differs from `expected.csv`.
+CI (`.github/workflows/ci.yml`): lint, install and import on pull requests and pushes to `main`;
+Tadpole 2020 end to end, checked against USGS, weekly and on demand (Ubuntu runners).
 
 ## Rules that are easy to break
 
@@ -109,6 +117,10 @@ exists yet; if you add tests, add the runner to `pyproject.toml` and list it her
 - **Test switches** force fallbacks end to end: `DFH_DEM_SOURCE=service`,
   `DFH_DNBR_SENSOR=sentinel2|landsat`, `DFH_DNBR_METHOD=single|composite`,
   `DFH_WFIGS_DOWN=1` (perimeter: saved, then RECOVER; checked against `wfigs_acres`).
+- **Licensed GPL-3.0-only**, like wildcat and pfdf (`LICENSE`). Results are an
+  independent, unofficial run of USGS's models: keep that notice in the README, the app
+  (`map/template.html` subtitle and attribution) and anything published. A new data source
+  needs a credit in the README's "Data credits" table.
 - More traps (DEM projection, nodata labels, WFIGS geometry, Windows GDAL hangs, Soil Data
   Access quirks): `design.md` §9.
 

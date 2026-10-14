@@ -174,7 +174,7 @@ body:not(.is-app) .app-only { display: none; }
 <aside>
   <div>
     <h1>Post-fire debris-flow hazard</h1>
-    <p class="sub">USGS models run by the Debris Flow Hunters pipeline</p>
+    <p class="sub">An independent, unofficial run of USGS models by the Debris Flow Hunters pipeline. Not a USGS assessment.</p>
   </div>
 
   <div>
@@ -256,7 +256,7 @@ body:not(.is-app) .app-only { display: none; }
         <label>Jump host (optional) <input name="jump_host" placeholder="login gateway"></label>
         <label>Jump user <input name="jump_user" placeholder="same as user"></label>
       </div>
-      <label>Folder on the cluster <input name="remote_dir" placeholder="~/scratch/dfh-staging" required></label>
+      <label>Folder on the cluster <input name="remote_dir" placeholder="~/scratch/Debris-Flow-Hunters" required></label>
       <label>Setup command <input name="setup" placeholder="source .venv/bin/activate"></label>
       <div class="row2">
         <label>Login with <select name="auth"><option value="key">SSH key</option><option value="password">Password</option></select></label>
@@ -1042,7 +1042,7 @@ slider.addEventListener("input", () => {
 });
 slider.addEventListener("change", () => style());
 toggleOverlay("t-hs", "hs"); toggleOverlay("t-sev", "sev"); toggleOverlay("t-osm", "osm");
-map.attributionControl.setPrefix("Leaflet");
+map.attributionControl.setPrefix("Leaflet | Models: USGS wildcat and pfdf, run unofficially | Data: NIFC, USGS, USDA, LANDFIRE; contains modified Copernicus Sentinel data");
 if (FIRES.length) showFire(FIRES[0].key);
 else {                        // an empty app: the western US, and a pointer to "Add a fire"
   map.setView([42, -114], 5);

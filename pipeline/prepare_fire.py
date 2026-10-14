@@ -626,7 +626,7 @@ def main():
         evt = warp_mosaic([evt_path], crs, transform, width, height, Resampling.nearest)
         write(inputs / "evt.tif", np.nan_to_num(evt, nan=FILL), crs, transform, FILL, "int16")
         sources["evt"] = "RECOVER LANDFIRE EVT"
-        print(f"evt       : RECOVER LANDFIRE EVT")
+        print("evt       : RECOVER LANDFIRE EVT")
     else:
         try:
             evt, year = landfire_evt(fire, crs, transform, width, height)

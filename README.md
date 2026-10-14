@@ -12,7 +12,10 @@ when one exists, and shows it on an interactive map you can export to GIS format
 Built for R-CON 2026 (Challenge 01: Wildfire Resilience) by the Debris Flow Hunters team.
 The intended users are land managers and emergency managers.
 
-**Research prototype.** Not an official USGS product and not for operational decisions.
+**An independent, unofficial run of USGS's models.** This project is not affiliated with or
+endorsed by the U.S. Geological Survey. Its maps are not USGS assessments and are not for
+operational decisions: for an official assessment, see the USGS Landslide Hazards Program
+(https://www.usgs.gov/programs/landslide-hazards/science/postfire-debris-flow-hazard-assessment-software).
 
 ## What you get for each fire
 
@@ -69,12 +72,14 @@ connection (every input is downloaded from public services; no accounts or keys)
    ```bash
    git clone <this repository> Debris-Flow-Hunters
    cd Debris-Flow-Hunters
-   git checkout staging
    uv sync
    ```
    `uv sync` fetches Python 3.12 and the USGS packages `pfdf` and `wildcat` from the USGS
    package index named in `pyproject.toml` (they are not on PyPI, so plain `pip install`
    will not find them).
+   On a minimal Linux install, the map and GIS packages also need one system library; if
+   you see `ImportError: libexpat.so.1`, install it with `sudo apt-get install libexpat1`
+   (Debian/Ubuntu). On Windows nothing extra is needed.
 
 ## Run
 
@@ -181,6 +186,16 @@ scripts run in the folder they were submitted from (default `~/scratch/Debris-Fl
 The app can also submit runs to Slurm when it runs on the cluster:
 `uv run python app/server.py --runner slurm`.
 
+### Reproducing the validation against observed debris flows
+
+`tests/observed/` reruns the white paper's check of the rainfall thresholds against debris
+flows seen in the field (12 fires, public USGS observations). See its README:
+
+```bash
+uv run python pipeline/batch.py all tests/observed/fires.txt --name observed --runner local --workers 3
+uv run python tests/observed/score_observed.py
+```
+
 ## Where things are
 
 | Folder | What is in it |
@@ -189,13 +204,68 @@ The app can also submit runs to Slurm when it runs on the cluster:
 | `map/` | The map page (`template.html`) and the offline map builder (`build_map.py`) |
 | `pipeline/` | Every step from a fire name to a finished assessment; `run_fire.py` runs them all |
 | `slurm/` | Batch scripts for an HPC cluster |
+| `tests/` | Reproducible checks: `observed/` scores the pipeline against observed debris flows; `check_imports.py` and `check_fire.py` (used by CI) |
+| `.github/workflows/` | Automatic checks on GitHub (`ci.yml`): lint, install and import on every pull request; one fire end to end weekly |
 | `fires/` | One small settings file per fire (`<fire>.json`), written automatically |
 | `data/` | Downloads and results; created as you run fires, never committed |
+
+## Credits and citation
+
+The hazard models are the USGS's, run through its open-source software. If you use this
+project's results, please cite the software and the models:
+
+- King, J., 2025, *wildcat - Command line tool to assess and map post-wildfire debris-flow
+  hazards*, version 1.1.0: U.S. Geological Survey software release, https://doi.org/10.5066/P1YN79CN
+- King, J., 2025, *pfdf - Python library for postfire debris-flow hazard assessments and
+  research*, version 3.0.0: U.S. Geological Survey software release, https://doi.org/10.5066/P1JJXSXD
+- Staley, D.M., Negri, J.A., Kean, J.W., Laber, J.L., Tillery, A.C., and Youberg, A.M., 2017,
+  Prediction of spatially explicit rainfall intensity–duration thresholds for post-fire
+  debris-flow generation in the western United States: Geomorphology, 278, 149–162,
+  https://doi.org/10.1016/j.geomorph.2016.10.019 (likelihood and rainfall thresholds, M1)
+- Gartner, J.E., Cannon, S.H., and Santi, P.M., 2014, Empirical models for predicting volumes
+  of sediment deposited by debris flows and sediment-laden floods in the transverse ranges of
+  southern California: Engineering Geology, 176, 45–56,
+  https://doi.org/10.1016/j.enggeo.2014.04.008 (volume)
+- Cannon, S.H., Gartner, J.E., Rupert, M.G., Michael, J.A., Rea, A.H., and Parrett, C., 2010,
+  Predicting the probability and volume of postwildfire debris flows in the intermountain
+  western United States: GSA Bulletin, 122(1–2), 127–144, https://doi.org/10.1130/B26459.1
+  (combined hazard class)
+
+wildcat and pfdf are provided by the USGS without warranty and are preliminary or
+provisional software (see their disclaimers); naming them does not imply USGS endorsement of
+this project.
+
+### Data credits
+
+Every input is public data. Results made with this project contain or are derived from:
+
+| Data | Provider |
+|---|---|
+| Fire perimeters and dates (WFIGS Interagency Perimeters) | National Interagency Fire Center |
+| Elevation (3DEP, 1/3 arc-second) | U.S. Geological Survey, The National Map |
+| Published hazard assessments and their burn inputs | U.S. Geological Survey Landslide Hazards Program, via ScienceBase |
+| Soil burn severity (BAER) | USDA Forest Service, BAER program |
+| Sentinel-2 imagery | Contains modified Copernicus Sentinel data (European Union / ESA), via Earth Search (Element 84) |
+| Landsat 8/9 imagery | U.S. Geological Survey, via Microsoft Planetary Computer |
+| Soil erodibility (STATSGO2, SSURGO) | USDA Natural Resources Conservation Service, Soil Survey Staff |
+| Vegetation type (LANDFIRE EVT) | LANDFIRE (USDA Forest Service and U.S. Department of the Interior) |
+| Fire data packages (RECOVER) | Idaho State University GIS Training and Research Center |
+| Map background | © OpenStreetMap contributors |
+
+The validation in `tests/observed/` uses observations from Graber et al. 2026
+(https://doi.org/10.5066/P1R9VXC4) and Selander et al. 2024 (https://doi.org/10.5066/P13TPP8J).
+
+## License
+
+GNU General Public License v3.0 (GPL-3.0-only), the same license as wildcat and pfdf; see
+`LICENSE`. To contribute, see `CONTRIBUTING.md`.
 
 ## More
 
 - `design.md`: how it works, where every input comes from, the results so far (with their
   sources), and the open items.
+- `CONTRIBUTING.md`: how to set up, the rules that keep results trustworthy, and how to
+  propose a change.
 - `CLAUDE.md`: orientation for AI coding agents working in this repository.
 - The models and tools: the USGS Landslide Hazards Program (https://www.usgs.gov/programs/landslide-hazards)
   runs the post-fire assessments; `wildcat` and `pfdf` are its open-source code

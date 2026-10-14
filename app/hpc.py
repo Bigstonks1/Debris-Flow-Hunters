@@ -18,7 +18,6 @@ import re
 import shlex
 import stat
 import sys
-import time
 from pathlib import Path
 
 import keyring
@@ -35,7 +34,7 @@ DEFAULTS = {
     "jump_host": "", "jump_port": 22, "jump_user": "",
     "auth": "key",                 # key | password
     "key_path": "",                # blank: the usual keys in ~/.ssh and any SSH agent
-    "remote_dir": "",              # the repository on the cluster, e.g. ~/scratch/dfh-staging
+    "remote_dir": "",              # the repository on the cluster, e.g. ~/scratch/Debris-Flow-Hunters
     "setup": "source .venv/bin/activate",
     "partition": "tiny", "max_running": 20,
     "staged": True,                # compute nodes have no internet: inputs on the login node
@@ -72,7 +71,7 @@ def validate(s):
     if s["partition"] and not re.fullmatch(r"[\w\-]{1,32}", s["partition"]):
         errors.append("partition: a Slurm partition name")
     if any(c in s["remote_dir"] for c in "\n\r;&|`$<>\"'"):
-        errors.append("remote_dir: a folder path, e.g. ~/scratch/dfh-staging")
+        errors.append("remote_dir: a folder path, e.g. ~/scratch/Debris-Flow-Hunters")
     for k in ("port", "jump_port", "max_running", "poll_s"):
         try:
             s[k] = int(s[k])

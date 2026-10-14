@@ -115,7 +115,7 @@ Each stage is a separate process, so a stage's memory and GDAL state stay contai
 | 3 | sentinel2 (only if no USGS inputs) | `sentinel2_dnbr.py` | Sentinel-2 L2A Collection 1, Earth Search STAC (`earth-search.aws.element84.com/v1`), COGs on AWS | `data/s2_dnbr/<key>/auto/dnbr.tif` (20 m) + `selection.json` (dates, tiles) | dNBR by rule when nobody has published one: pre and post scenes ≥ 98% clear, post date where burned area stops growing; see section 8.6. |
 | 4 | prepare | `prepare_fire.py` | USGS 3DEP 1/3 arc-second DEM tiles from TNM S3 (`prd-tnm.s3.amazonaws.com`); STATSGO KF-factor via `pfdf.data.usgs.statsgo`; EVT from RECOVER, else LANDFIRE ImageServer (`lfps.usgs.gov`) | `data/<key>_usgs_usgs/` or `data/<key>_s2_auto_estimate/`: `inputs/` (perimeter, dem, dnbr, severity or none, kf, evt) on one UTM 10 m grid, and `configuration.py` from `pipeline/wildcat_config_template.py` | wildcat needs every raster on one projected grid. Without USGS severity, wildcat estimates it from dNBR (125/250/500). |
 | 5 | wildcat | `measure.py` → `wildcat.preprocess/assess/export` | (the project) | `preprocessed/`, `exports/segments.shp`, `basins.shp`, `outlets.shp` (WGS 84); each stage's seconds and peak MB | The USGS models (section 5). Each stage in a fresh process so its memory is its own. With `--split`: `split_fire.py` instead (section 7). |
-| 6 | usgs | `usgs_check.py` → `compare_usgs.py` | USGS assessment service; ScienceBase archive (2013–2024) as fallback | `<project>/usgs_check.json`; `usgs_reference` in the config | Validation: finds USGS's own assessment by location, downloads its segments, and matches streams within 20 m. Never fails a run. |
+| 6 | usgs | `usgs_check.py` → `compare_usgs.py` | USGS assessment service; ScienceBase archive (2013–2024) as fallback | `<project>/usgs_check.json`; `usgs_reference` in the config | Validation: finds USGS's own assessment by location, downloads its segments, and matches streams within 20 m. A found assessment is reused on later runs; if its download is gone (e.g. `data/usgs` cleared), it searches again. Never fails a run. |
 
 Timings: `data/<key>_run_timings.json`. Typical: 1–2 min for a small fire, ~4 min for
 Wapiti (522 km²) with downloads.
@@ -311,7 +311,7 @@ had run here.
   generated (`app_YYYYMMDD-HHMMSS`), so nothing typed in the page reaches the remote shell
   unquoted. The server listens on 127.0.0.1 only.
 
-Tested 2026-10-08 (staging app):
+Tested 2026-10-08 (the app):
 - **Local batch:** Border 6 and Upper Smith 2026 were ticked in search and run here.
   - Upper Smith was done in 74 s, appeared on the map as not kept, and its row and log
     showed in Batches.
@@ -729,7 +729,7 @@ the test switches `DFH_DNBR_SENSOR`, `DFH_DNBR_METHOD` and `DFH_DEM_SOURCE`.
 | WFIGS down, `--cold`: stale RECOVER / no bundle / no acreage record | Rush 2025 / Woodhead 2020 / Wood without `wfigs_acres` | each stops with its reason |
 | WFIGS down: a fire never run before | Upper Smith 2026 | stops: "cannot be looked up until WFIGS is back" |
 
-The app, same day, against the staging server:
+The app, same day, against its local server:
 - **Fires and map:** all 11 fires load; tiles, the per-fire threshold legend and the
   input-data list are right for each path (Rush published, Wood BAER map, Eagle Bluff
   estimated with LANDFIRE and SSURGO rows).
@@ -797,12 +797,14 @@ and 40 mm/h; the map lets the user pick any storm.
 | `pipeline/split_fire.py` | Watershed split: preprocess, plan, build, run, merge, compare (section 7) |
 | `pipeline/usgs_check.py`, `compare_usgs.py` | Find, fetch and compare USGS's own assessment |
 | `slurm/*.slurm` | `run_fire` (one fire), `split_prepare` / `split_pieces` / `split_merge` (1 m array) |
+| `tests/observed/` | Validation against observed debris flows on 12 fires: fire list, scorer, the white paper's numbers (8.11) |
 | `fires/*.json` | One settings file per fire (written automatically) |
 | `data/` | Everything downloaded or computed (gitignored) |
 
-The research scripts behind section 8 (resolution sweep, scoring against observed flows,
-Graber comparison, Trail Creek case study) are not on this branch; they live on
-`wapiti-e2e` (uncommitted as of 2026-09-28).
+The 12-fire validation against observed debris flows is on this branch (`tests/observed/`,
+8.11). The other research scripts behind section 8 (resolution sweep, Grizzly scoring,
+Graber comparison, Trail Creek case study) are not; they live on `wapiti-e2e`
+(uncommitted as of 2026-10-14).
 
 ---
 
@@ -914,7 +916,8 @@ Five methods, used throughout 8.1–8.9. Each result names the one(s) it uses.
     and debris-flow observations (doi:10.5066/P9Z7RROL);
   - the USGS runoff-generated post-fire debris-flow inventory (doi:10.5066/P1R9VXC4);
   - rain-gauge peak 15-minute intensities.
-  - Scripts: `m3/score_resolutions.py` and `graber/evaluation.py` on `wapiti-e2e`.
+  - Scripts: `m3/score_resolutions.py` and `graber/evaluation.py` on `wapiti-e2e`; the
+    same method over 12 fires is `tests/observed/score_observed.py` on this branch (8.11).
 - **What:** do our thresholds predict where and when debris flows happened?
 - **Why:** agreeing with USGS is not the same as being right. Observed flows are the real
   test, and the only way to say whether an input (DEM, severity) improves accuracy.
@@ -1314,7 +1317,53 @@ rasters (8.4: ours resampled onto the reference grid; burned pixels are referenc
     - The severity result rests on three fires.
     - Woodhead's T ratio rose with the BAER map (1.36 → 1.53) without changing its
       threshold ratio, so "closer T" and "closer threshold" do not always go together.
-    - No lower-48 fire has needed the composite or Landsat end to end yet.
+    - One lower-48 fire has needed Landsat end to end: Calf Canyon 2022 (8.11), a Landsat
+      composite whose result was not like USGS's (dNBR ratio 0.80, with a partial BAER map).
+
+### 8.11 Observed debris flows on 12 fires: as good as USGS's assessments
+
+- **Source:**
+  - observations: the USGS runoff-generated postfire debris-flow inventory v1 (Graber et al.
+    2026, doi:10.5066/P1R9VXC4) and the western Cascades of Oregon inventory (Selander et
+    al. 2024, doi:10.5066/P13TPP8J), downloaded from ScienceBase;
+  - our thresholds: full pipeline runs of the 12 fires in `tests/observed/fires.txt`
+    (Sentinel-2 dNBR and the Forest Service BAER severity map for every fire);
+  - script: `tests/observed/score_observed.py`; the white paper's numbers are
+    `tests/observed/expected.csv`;
+  - first run 2026-10-11 (laptop); reproduced 2026-10-14 from a fresh
+    clone with no cached downloads (1,545 s for the batch, 3 fires at a time): all 81
+    numbers identical.
+- **What:** do the thresholds our map shows predict observed debris flows, and how do they
+  compare with USGS's thresholds on the same watersheds and storms?
+- **Why:** 8.1 shows we reproduce USGS's product; this tests whether the product is right,
+  on more than one fire (8.0 B scored only Grizzly).
+- **How:** method B. USGS baseline: M1 from the inventory's T, F, S, or the Oregon release's
+  `M1_I15`. Year 1 only; observations matched in both assessments.
+- **Selection:** the 4 Oregon fires, plus inventory fires from 2020 on (WFIGS and Sentinel-2
+  years) with at least 3 first-year flows and 12 first-year observations: 15 fires. Idaho
+  has no public inventory of observed flows with rainfall. Three were dropped:
+  - East Troublesome 2020 (CO): no usable post-fire image (late-October fire, snow); stops.
+  - Hermits Peak-Calf Canyon 2022 (NM): WFIGS's Hermits Peak record has the merged fire's
+    acreage but a 170 km² polygon, so the perimeter check refuses it. Calf Canyon's own
+    record ran on a Landsat composite and a BAER map covering 62% of the fire (dNBR ratio
+    0.80, threshold ratio 1.23): not like for like.
+  - Beachie Creek 2020 (OR): the post-fire date rule picked 2020-08-30, before the Labor Day
+    run (dNBR ratio −0.02, threshold ratio 2.12).
+- **Result (12 fires, 904 cases, 127 flows):**
+
+  | | Flows caught | False alarms | Threat score | MCC |
+  |---|---|---|---|---|
+  | Ours | 99/127 (78%) | 316/777 (41%) | 0.22 | 0.26 |
+  | USGS | 89/127 (70%) | 289/777 (37%) | 0.21 | 0.23 |
+
+  Gauge within 4 km: 52 and 51 of 60 flows caught. Threshold ratios to USGS on these fires:
+  0.89–1.01. Per-fire rows: the white paper's Table 3 and `tests/observed/expected.csv`.
+- **What it means:** the automated pipeline predicts observed flows as well as USGS's
+  assessments, slightly more cautiously. Skill varies far more between fires than between
+  the two: both do well at Grizzly Creek and East Fork, and both fail in western Oregon
+  (1 of 8 first-year flows caught), where 5 of the 8 began as landslides or in-channel
+  failures, which M1 does not model. **Limits:** 12 fires, none in Idaho; the three dropped
+  fires are pipeline problems to fix (section 10), not results.
 
 ---
 
@@ -1398,7 +1447,16 @@ rasters (8.4: ours resampled onto the reference grid; burned pixels are referenc
       or USGS's wildcat build).
 - [ ] Sentinel-2 date rule for long fires (Big Bear: post date 20 days into a four-month
       fire); BAER scene IDs for Big Bear and Woodhead would close 8.4.
-- [ ] A scored second fire: the Wapiti debris-flow inventory (Robby Jost, Boise State).
+- [x] Score more fires against observed flows: 12 western fires, as good as USGS (8.11).
+- [ ] An Idaho fire scored: the Wapiti debris-flow inventory (Robby Jost, Boise State).
+- [ ] Sentinel-2 date rule picked a post date before a fire's main run (Beachie Creek 2020:
+      the plateau rule stopped at two steady readings of <1% burned) (8.11).
+- [ ] Late-season fires with snow and no clear post-fire image (East Troublesome 2020): use
+      the next summer's image, or say so in the app (8.11).
+- [ ] WFIGS merged-fire records whose polygon is a fraction of their acreage (Hermits Peak
+      2022) (8.11).
+- [ ] A BAER map covering only part of the fire is accepted (Calf Canyon 2022: 62%); fill the
+      rest from estimated severity, or fall back (8.11).
 - [ ] Is the RECOVER 1 m LiDAR layer bare earth? (Keith)
 
 **HPC**
@@ -1435,12 +1493,13 @@ rasters (8.4: ours resampled onto the reference grid; burned pixels are referenc
       only, version recorded; Wood fire-wide threshold +0.08% (4.1).
 - [x] Fires whose WFIGS perimeter crosses a national border: clipped to US elevation
       coverage and recorded (Border 6 2026: 3.7 of 10.6 km2 removed); other fires unchanged (4.1).
-- [ ] Run a lower-48 fire that actually needs the composite or Landsat end to end (so far:
-      Grizzly 2024, Alaska, dNBR step only; Wood 2024 Landsat forced).
+- [x] Run a lower-48 fire that actually needs the composite or Landsat end to end: Calf
+      Canyon 2022, Landsat composite; it ran, but not like USGS's (8.11).
 - [ ] LANDFIRE EVT for Alaska, Hawaii, Puerto Rico.
 - [ ] Authentication before the app is served beyond localhost.
-- [ ] Tests (no test tooling yet).
+- [ ] Unit tests (no test tooling yet; `tests/observed/` is an end-to-end reproduction; CI
+      in `.github/workflows/ci.yml` lints, installs, imports, and runs one fire weekly).
 
 **Project**
-- [ ] Commit `staging` (and the research on `wapiti-e2e`); both are uncommitted.
+- [ ] Commit this work and merge it into `main` (and commit the research on `wapiti-e2e`).
 - [ ] Showcase 2026-10-13: findings one-pager and a rehearsed demo.

@@ -27,7 +27,6 @@ import time
 import traceback
 import uuid
 import zipfile
-from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse

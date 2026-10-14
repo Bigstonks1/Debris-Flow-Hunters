@@ -44,7 +44,7 @@ from pathlib import Path
 import fiona
 import numpy as np
 from pyproj import Transformer
-from shapely.geometry import Point, mapping, shape
+from shapely.geometry import Point, shape
 from shapely.ops import transform, unary_union
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -225,6 +225,10 @@ def main():
     result = {"checked": date.today().isoformat()}
     try:
         ref, stats, tried = fire.get("usgs_reference"), None, []
+        if ref and ref.get("auto") and not (ROOT / ref["segments"]).exists():
+            # its download was deleted (e.g. data/usgs cleared): find and fetch it again
+            print(f"USGS reference {ref['code']}: {ref['segments']} is missing; searching again")
+            ref = None
         if ref:
             stats = compare(ref, project)
         else:
