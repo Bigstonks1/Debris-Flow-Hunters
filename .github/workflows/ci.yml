@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 9 * * 1"          # Mondays 09:00 UTC: catches changes in the public data services
+  workflow_dispatch:              # "Run workflow" button in the Actions tab
+
+permissions:
+  contents: read                  # the jobs only read the code
+
+jobs:
+  install:
+    name: Lint, install and import
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.21"
+          enable-cache: true
+      - name: Lint (Ruff, settings in pyproject.toml)
+        run: uvx ruff@0.14.0 check .
+      - name: Install (pfdf and wildcat from the USGS package index)
+        run: uv sync --locked
+      - name: Import every module
+        run: uv run python tests/check_imports.py
+
+  fire:
+    name: One fire end to end (Tadpole 2020)
+    # Downloads from about ten public services, so a brief outage can fail it: weekly and on
+    # demand only, not on every pull request.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: install
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.21"
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Run the pipeline
+        run: uv run python pipeline/run_fire.py --id 2020-NMGNF-000232
+      - name: Check the result against USGS's assessment
+        run: uv run python tests/check_fire.py tadpole_2020
+      - name: Keep the run's records
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tadpole-2020
+          path: |
+            fires/tadpole_2020.json
+            data/tadpole_2020_*/sources.json
+            data/tadpole_2020_*/usgs_check.json
+            data/tadpole_2020_run_timings.json
+          if-no-files-found: ignore

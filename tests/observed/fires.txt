@@ -1,0 +1,16 @@
+# Fires with public observations of post-fire debris flows (and of storms without one),
+# by Unique Fire ID (WFIGS). These are the 12 fires in the white paper's Table 3.
+# Oregon: Selander et al. 2024, doi:10.5066/P13TPP8J
+2020-ORUPF-000436
+2020-ORWIF-200430
+2020-ORMHF-000859
+# Other western states: USGS runoff-generated postfire debris-flow inventory, doi:10.5066/P1R9VXC4
+2020-CALPF-002428
+2020-COWRF-000348
+2020-COARF-000636
+2020-NMGNF-000232
+2020-UTASF-100340
+2021-WANES-000373
+2021-WAOWF-000320
+2021-WACOF-002290
+2024-WYBHF-000399
